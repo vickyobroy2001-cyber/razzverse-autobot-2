@@ -15,9 +15,13 @@ slot_index = datetime.utcnow().hour % 4
 current_niche = NICHES[slot_index]
 
 # 2. Generate Conversational Hindi Script (Alia Bhatt / Modern Youth Vibe)
-raw_key = os.environ.get("GEMINI_API_KEY", "").strip().strip('"').strip("'")
-print(f"Checking API Key: Starts with '{raw_key[:6]}', Length is {len(raw_key)} chars")
-client = genai.Client(api_key=raw_key)
+import re
+raw_secret = os.environ.get("GEMINI_API_KEY", "")
+# Automatically pulls out just the clean API key even if extra curl text was pasted
+match = re.search(r'(AIza[0-9A-Za-z\-_]+|AQ\.[0-9A-Za-z\-_]+)', raw_secret)
+clean_key = match.group(1) if match else raw_secret.strip()
+client = genai.Client(api_key=clean_key)
+
 
 prompt = f"""
 You are the viral creator for 'Razzverse'. Write a 40-second YouTube Short / IG Reel in the niche: {current_niche}.
