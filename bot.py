@@ -1,4 +1,4 @@
-import os, json, asyncio, requests, urllib.parse
+import os, re, json, asyncio, requests, urllib.parse
 from datetime import datetime
 from google import genai
 import edge_tts
@@ -14,14 +14,11 @@ NICHES = [
 slot_index = datetime.utcnow().hour % 4
 current_niche = NICHES[slot_index]
 
-# 2. Generate Conversational Hindi Script (Alia Bhatt / Modern Youth Vibe)
-import re
+# 2. Clean API Key & Generate Conversational Hindi Script
 raw_secret = os.environ.get("GEMINI_API_KEY", "")
-# Automatically pulls out just the clean API key even if extra curl text was pasted
 match = re.search(r'(AIza[0-9A-Za-z\-_]+|AQ\.[0-9A-Za-z\-_]+)', raw_secret)
 clean_key = match.group(1) if match else raw_secret.strip()
 client = genai.Client(api_key=clean_key)
-
 
 prompt = f"""
 You are the viral creator for 'Razzverse'. Write a 40-second YouTube Short / IG Reel in the niche: {current_niche}.
@@ -40,16 +37,16 @@ Return ONLY valid JSON in this exact format:
   ]
 }}
 """
+
 response = client.models.generate_content(
-    model="gemini-2.5-flash",
+    model="gemini-3.8-flash",
     contents=prompt,
     config={"response_mime_type": "application/json"}
 )
 data = json.loads(response.text)
 
-# 3. Generate Youthful Hindi Female Voiceover (Tuned Pitch & Speed)
+# 3. Generate Youthful Hindi Female Voiceover
 async def make_audio():
-    # hi-IN-SwaraNeural tuned with +12% speed and +6Hz pitch for a young, lively female tone
     communicate = edge_tts.Communicate(
         text=data["voiceover"],
         voice="hi-IN-SwaraNeural",
@@ -62,12 +59,13 @@ asyncio.run(make_audio())
 audio = AudioFileClip("voice.mp3")
 scene_duration = audio.duration / len(data["image_prompts"])
 
-# 4. Generate 4 Free Vertical AI Images (Pollinations API)
+# 4. Generate 4 Free Vertical AI Images
 clips = []
+headers = {"User-Agent": "Mozilla/5.0"}
 for i, img_prompt in enumerate(data["image_prompts"]):
     encoded = urllib.parse.quote(img_prompt)
     url = f"https://image.pollinations.ai/prompt/{encoded}?width=1080&height=1920&nologo=true&seed={i+200}"
-    img_data = requests.get(url).content
+    img_data = requests.get(url, headers=headers, timeout=60).content
     img_path = f"scene_{i}.jpg"
     with open(img_path, "wb") as f:
         f.write(img_data)
@@ -78,15 +76,30 @@ for i, img_prompt in enumerate(data["image_prompts"]):
 final_video = concatenate_videoclips(clips, method="compose").set_audio(audio)
 final_video.write_videofile("razzverse_short.mp4", fps=24, codec="libx264", audio_codec="aac")
 
-# 6. Auto-Send Video & Caption to Make.com (For YouTube & Instagram Auto-Upload)
+# 6. Save Metadata & Auto-Send to Make.com (If Connected)
+with open("metadata.json", "w", encoding="utf-8") as f:
+    json.dump({"title": data["title"], "caption": data["caption"], "niche": current_niche}, f, ensure_ascii=False)
+
 webhook_url = os.environ.get("MAKE_WEBHOOK_URL")
 if webhook_url:
+    with open("razzverse_short.mp4", "rb") as f:
+        catbox_res = requests.post(
+            "https://catbox.moe/user/api.php",
+            data={"reqtype": "fileupload"},
+            files={"fileToUpload": f}
+        )
+    public_video_url = catbox_res.text.strip()
+
     with open("razzverse_short.mp4", "rb") as video_file:
         requests.post(
             webhook_url,
-            data={"title": data["title"], "caption": data["caption"], "niche": current_niche},
+            data={
+                "title": data["title"],
+                "caption": data["caption"],
+                "video_url": public_video_url
+            },
             files={"video": ("razzverse_short.mp4", video_file, "video/mp4")}
         )
-    print("Uploaded to Make.com for YouTube & Instagram publishing!")
+    print("Sent to Make.com!")
 
 print("SUCCESS: Razzverse Hindi video rendered:", data["title"])
