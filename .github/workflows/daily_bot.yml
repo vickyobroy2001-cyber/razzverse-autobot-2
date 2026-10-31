@@ -1,0 +1,40 @@
+name: Razzverse 4x Daily Auto-Bot
+
+on:
+  schedule:
+    - cron: '30 3 * * *'   # 9:00 AM IST
+    - cron: '30 7 * * *'   # 1:00 PM IST
+    - cron: '30 12 * * *'  # 6:00 PM IST
+    - cron: '0 16 * * *'   # 9:30 PM IST
+  workflow_dispatch:       # Lets you test-run with 1 tap on your phone
+
+jobs:
+  build_and_upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install -r requirements.txt
+
+      - name: Generate Razzverse Video
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python bot.py
+
+      - name: Upload Finished MP4 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: razzverse-daily-video
+          path: |
+            razzverse_short.mp4
+            metadata.json
+            
