@@ -1,8 +1,8 @@
-import os, re, json, asyncio, requests, urllib.parse
+import os, re, time, json, asyncio, requests, urllib.parse
 from datetime import datetime
 from google import genai
 import edge_tts
-from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
+from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, ColorClip
 
 # 1. Rotate Through Your 4 Razzverse Niches Daily
 NICHES = [
@@ -14,7 +14,7 @@ NICHES = [
 slot_index = datetime.utcnow().hour % 4
 current_niche = NICHES[slot_index]
 
-# 2. Clean API Key & Generate Conversational Hindi Script
+# 2. Clean API Key Automatically
 raw_secret = os.environ.get("GEMINI_API_KEY", "")
 match = re.search(r'(AIza[0-9A-Za-z\-_]+|AQ\.[0-9A-Za-z\-_]+)', raw_secret)
 clean_key = match.group(1) if match else raw_secret.strip()
@@ -38,68 +38,22 @@ Return ONLY valid JSON in this exact format:
 }}
 """
 
-response = client.models.generate_content(
-    model="gemini-3.8-flash",
-    contents=prompt,
-    config={"response_mime_type": "application/json"}
-)
-data = json.loads(response.text)
+# 3. Massive Multi-Model Fallback List + Auto-Discovery
+MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro"
+]
 
-# 3. Generate Youthful Hindi Female Voiceover
-async def make_audio():
-    communicate = edge_tts.Communicate(
-        text=data["voiceover"],
-        voice="hi-IN-SwaraNeural",
-        rate="+12%",
-        pitch="+6Hz"
-    )
-    await communicate.save("voice.mp3")
-
-asyncio.run(make_audio())
-audio = AudioFileClip("voice.mp3")
-scene_duration = audio.duration / len(data["image_prompts"])
-
-# 4. Generate 4 Free Vertical AI Images
-clips = []
-headers = {"User-Agent": "Mozilla/5.0"}
-for i, img_prompt in enumerate(data["image_prompts"]):
-    encoded = urllib.parse.quote(img_prompt)
-    url = f"https://image.pollinations.ai/prompt/{encoded}?width=1080&height=1920&nologo=true&seed={i+200}"
-    img_data = requests.get(url, headers=headers, timeout=60).content
-    img_path = f"scene_{i}.jpg"
-    with open(img_path, "wb") as f:
-        f.write(img_data)
-    clip = ImageClip(img_path).set_duration(scene_duration)
-    clips.append(clip)
-
-# 5. Render Final 9:16 MP4 Video
-final_video = concatenate_videoclips(clips, method="compose").set_audio(audio)
-final_video.write_videofile("razzverse_short.mp4", fps=24, codec="libx264", audio_codec="aac")
-
-# 6. Save Metadata & Auto-Send to Make.com (If Connected)
-with open("metadata.json", "w", encoding="utf-8") as f:
-    json.dump({"title": data["title"], "caption": data["caption"], "niche": current_niche}, f, ensure_ascii=False)
-
-webhook_url = os.environ.get("MAKE_WEBHOOK_URL")
-if webhook_url:
-    with open("razzverse_short.mp4", "rb") as f:
-        catbox_res = requests.post(
-            "https://catbox.moe/user/api.php",
-            data={"reqtype": "fileupload"},
-            files={"fileToUpload": f}
-        )
-    public_video_url = catbox_res.text.strip()
-
-    with open("razzverse_short.mp4", "rb") as video_file:
-        requests.post(
-            webhook_url,
-            data={
-                "title": data["title"],
-                "caption": data["caption"],
-                "video_url": public_video_url
-            },
-            files={"video": ("razzverse_short.mp4", video_file, "video/mp4")}
-        )
-    print("Sent to Make.com!")
-
-print("SUCCESS: Razzverse Hindi video rendered:", data["title"])
+# Auto-discover any other available Gemini text models on your key
+try:
+    for m in client.models.list():
+        
