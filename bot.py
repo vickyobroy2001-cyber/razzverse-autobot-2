@@ -15,7 +15,10 @@ slot_index = datetime.utcnow().hour % 4
 current_niche = NICHES[slot_index]
 
 # 2. Generate Conversational Hindi Script (Alia Bhatt / Modern Youth Vibe)
-client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+raw_key = os.environ.get("GEMINI_API_KEY", "").strip().strip('"').strip("'")
+print(f"Checking API Key: Starts with '{raw_key[:6]}', Length is {len(raw_key)} chars")
+client = genai.Client(api_key=raw_key)
+
 prompt = f"""
 You are the viral creator for 'Razzverse'. Write a 40-second YouTube Short / IG Reel in the niche: {current_niche}.
 The speaker is a young, energetic, expressive Indian girl (like Alia Bhatt's bubbly, smart, conversational style).
