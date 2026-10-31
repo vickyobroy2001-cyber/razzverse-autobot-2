@@ -1,0 +1,14 @@
+google-genai
+edge-tts
+moviepy==1.0.3
+requests
+Pillow==9.5.0
+google-api-python-client
+google-auth-oauthlib
+google-genai
+edge-tts
+moviepy==1.0.3
+requests
+Pillow==9.5.0
+google-api-python-client
+google-auth-oauthlib
