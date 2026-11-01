@@ -1,75 +1,36 @@
-import os, re, time, json, asyncio, requests, urllib.parse
-from datetime import datetime
-from google import genai
-import edge_tts
-from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, ColorClip
+#!/usr/bin/env python3
+"""
+Razzverse Shorts generator - hardened version.
 
-NICHES = [
-    "Psychology & Mind Tricks (इंसानी दिमाग और व्यवहार के रहस्य)",
-    "AI & Tech Money/Productivity Hacks (AI और टेक्नोलॉजी से पैसे और समय बचाने के हैक्स)",
-    "Science Trivia & Mystery (विज्ञान के ऐसे रहस्य जो दिमाग हिला दें)",
-    "Bizarre Historical & Mystery Facts (इतिहास के सबसे अजीब और रहस्यमयी सच)"
-]
-current_niche = NICHES[datetime.utcnow().hour % 4]
+pip install google-genai edge-tts moviepy requests pillow gTTS
 
-raw_secret = os.environ.get("GEMINI_API_KEY", "")
-match = re.search(r'AIza[0-9A-Za-z\-_]{35}', raw_secret)
-clean_key = match.group(0) if match else raw_secret.strip()
-client = genai.Client(api_key=clean_key)
+Design rule: every stage has retries + a fallback, so the pipeline keeps going.
+Only a total failure (no audio at all / video can't render) exits non-zero.
+"""
+import os
+import re
+import sys
+import json
+import time
+import random
+import asyncio
+import logging
+import traceback
+import urllib.parse
+from io import BytesIO
+from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 
-prompt = f"""You are the viral creator for 'Razzverse'. Write a 40-second YouTube Short / IG Reel in the niche: {current_niche}.
-The speaker is a young, energetic, expressive Indian girl (like Alia Bhatt's bubbly, smart, conversational style).
-Write the 'voiceover' in natural, spoken Hindi (Devanagari script) mixed with common English words (written in Devanagari, e.g., साइकोलॉजी, ट्रिक, AI, रिसर्च) so the Hindi TTS pronounces it natively.
-Return ONLY valid JSON in this exact format:
-{{"title": "Viral Hinglish/English Title under 60 chars #shorts #razzverse", "caption": "Engaging Hindi/Hinglish caption with 5 hashtags #razzverse #hindishorts", "voiceover": "Full spoken Hindi script in Devanagari, around 90 words.", "image_prompts": ["Detailed vertical 9:16 cinematic 8k prompt 1", "prompt 2", "prompt 3", "prompt 4", "prompt 5"]}}"""
+import requests
+from PIL import Image
 
-MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+# ---- moviepy v2 / v1 compatibility -----------------------------------------
+try:
+    from moviepy import ImageClip, AudioFileClip, concatenate_videoclips  # v2.x
+except ImportError:
+    from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips  # v1.x
 
-def get_script():
-    try:
-        for m in client.models.list():
-            mn = m.name.replace("models/", "")
-            if "gemini" in mn and mn not in MODELS and not any(x in mn for x in ["image", "tts", "live", "embedding", "veo"]):
-                MODELS.append(mn)
-    except Exception:
-        pass
-    for model_name in MODELS:
-        for attempt in range(2):
-            try:
-                print(f"Trying {model_name}...")
-                res = client.models.generate_content(model=model_name, contents=prompt, config={"response_mime_type": "application/json"})
-                if res.text:
-                    return res.text
-            except Exception as e:
-                print(f" Skip {model_name}: {e}")
-                time.sleep(3)
-    raise RuntimeError("All models busy")
 
-raw = re.sub(r'^```json\s*|\s*```$', '', get_script().strip(), flags=re.MULTILINE).strip()
-data = json.loads(raw)
+def _set_duration(clip, d):
+    return clip.with_duration(d) if hasattr(clip, "with_duration") else clip.set_duration(d)
 
-asyncio.run(edge_tts.Communicate(text=data["voiceover"], voice="hi-IN-SwaraNeural", rate="+12%", pitch="+4Hz").save("voice.mp3"))
-audio = AudioFileClip("voice.mp3")
-dur = audio.duration / len(data["image_prompts"])
-
-def get_clip(idx, p):
-    url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(p)}?width=1080&height=1920&nologo=true&seed={idx+100}"
-    for _ in range(3):
-        try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=45)
-            if r.status_code == 200 and len(r.content) > 1000:
-                open(f"scene_{idx}.jpg", "wb").write(r.content)
-                return ImageClip(f"scene_{idx}.jpg").set_duration(dur)
-        except Exception:
-            time.sleep(3)
-    return ColorClip(size=(1080, 1920), color=(20, 20, 35), duration=dur)
-
-clips = [get_clip(i, p) for i, p in enumerate(data["image_prompts"])]
-concatenate_videoclips(clips, method="compose").set_audio(audio).write_videofile("razzverse_short.mp4", fps=24, codec="libx264", audio_codec="aac")
-request.postopen("metadata.json", "w", encoding="utf-8").write(json.dumps(data, ensure_ascii=False, indent=2))
-print("SUCCESS: Razzverse Hindi Video rendered:", data["title"])
-wh = os.environ.get("MAKE_WEBHOOK_URL", "").strip()
-wh = os.environ.get("MAKE_WEBHOOK_URL", "").strip()
-pub_url = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": open("razzverse_short.mp4", "rb")}).text.strip() if wh else ""
-if wh: requests.post(wh, data={"title": data["title"], "caption": data["caption"], "video_url": pub_url}, files={"file": ("razzverse_short.mp4", open("razzverse_short.mp4", "rb"), "video/mp4")})
-    
