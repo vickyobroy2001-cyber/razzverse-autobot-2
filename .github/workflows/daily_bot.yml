@@ -28,7 +28,9 @@ jobs:
       - name: Generate Razzverse Video
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
         run: python bot.py
+        
 
       - name: Upload Finished MP4 Artifact
         uses: actions/upload-artifact@v4
