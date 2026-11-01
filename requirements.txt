@@ -12,3 +12,11 @@ requests
 Pillow==9.5.0
 google-api-python-client
 google-auth-oauthlib
+google-genai
+edge-tts
+gTTS
+requests
+Pillow
+moviepy
+imageio-ffmpeg
+
