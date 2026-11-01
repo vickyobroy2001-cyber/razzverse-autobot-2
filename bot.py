@@ -66,4 +66,4 @@ print("SUCCESS: Razzverse Hindi video rendered:", data["title"])
 wh = os.environ.get("MAKE_WEBHOOK_URL", "").strip()
 pub_url = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": open("razzverse_short.mp4", "rb")}).text.strip() if wh else ""
 if wh: requests.post(wh, data={"title": data["title"], "caption": data["caption"], "video_url": pub_url}, files={"video": ("razzverse_short.mp4", open("razzverse_short.mp4", "rb"), "video/mp4")})
-    
+    wh = os.environ.get("MAKE_WEBHOOK_URL", "").strip()
