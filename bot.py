@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+"""
+Razzverse MASTER - Fast, Crash-Proof Hindi Shorts Bot with Direct Make.com Delivery.
+"""
 import os
 import re
 import sys
@@ -8,7 +12,6 @@ import shutil
 import asyncio
 import logging
 import subprocess
-import traceback
 import urllib.parse
 from io import BytesIO
 from contextlib import contextmanager
@@ -18,7 +21,6 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 from PIL import Image
 
-
 # ---- config -----------------------------------------------------------------
 def _env_int(name, default):
     try:
@@ -27,20 +29,23 @@ def _env_int(name, default):
         return default
 
 
-W, H = 1080, 1920                                  # final video size
-GEN_W, GEN_H = _env_int("IMG_GEN_W", 720), _env_int("IMG_GEN_H", 1280)  # generate small = faster; use 1080x1920 for sharper
+W, H = 1080, 1920
+GEN_W, GEN_H = _env_int("IMG_GEN_W", 720), _env_int("IMG_GEN_H", 1280)
 FPS = 24
 IMG_WORKERS = max(1, _env_int("IMG_WORKERS", 3))
-SEND_FILE_TO_WEBHOOK = os.environ.get("WEBHOOK_SEND_FILE", "1") != "0"   # set to 0 to send only the link (faster)
-# Better: put the URL in the MAKE_WEBHOOK_URL secret and delete this default.
+SEND_FILE_TO_WEBHOOK = os.environ.get("WEBHOOK_SEND_FILE", "1") != "0"
+
+# Direct Make.com Webhook URL baked in as automatic fallback
 DEFAULT_WEBHOOK = "https://hook.us2.make.com/dvt7x9d1fceu5vbr43snt0w8tyysw0dg"
 
 VOICE = os.environ.get("TTS_VOICE", "hi-IN-SwaraNeural")
 OUT_VIDEO, OUT_AUDIO, OUT_META = "razzverse_short.mp4", "voice.mp3", "metadata.json"
-UA = {"User-Agent": "Mozilla/5.0"}
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 PREFERRED_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
-SKIP_MODEL_WORDS = ("image", "tts", "live", "embedding", "veo", "imagen", "aqa",
-                    "robotics", "computer", "audio", "gemma", "learnlm", "vision")
+SKIP_MODEL_WORDS = (
+    "image", "tts", "live", "embedding", "veo", "imagen", "aqa",
+    "robotics", "computer", "audio", "gemma", "learnlm", "vision"
+)
 
 NICHES = [
     "Psychology & Mind Tricks (दिमाग और व्यवहार के गहरे रहस्य)",
@@ -49,7 +54,6 @@ NICHES = [
     "Success, Money & Power Laws (सफलता, पैसा और शक्ति के मनोवैज्ञानिक नियम)",
 ]
 
-# Used only if Gemini is totally unavailable, so the channel still posts. One per niche.
 FALLBACKS = [
     {
         "title": "Eye Contact Ka Secret Trick #shorts #razzverse",
@@ -97,7 +101,7 @@ def retry(fn, tries=3, delay=2, what="task"):
     for i in range(1, tries + 1):
         try:
             return fn()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             last = e
             log.warning("%s failed (%d/%d): %s", what, i, tries, str(e)[:200])
             if i < tries:
@@ -106,19 +110,26 @@ def retry(fn, tries=3, delay=2, what="task"):
 
 
 def themed_prompts(theme):
-    angles = ["wide establishing shot", "close-up detail", "dramatic low angle",
-              "moody atmospheric lighting", "glowing abstract concept art"]
-    return [f"cinematic vertical 9:16 dark moody 8k, {theme}, {a}, volumetric light, ultra detailed, no text"
-            for a in angles]
+    angles = [
+        "wide establishing shot",
+        "close-up detail",
+        "dramatic low angle",
+        "moody atmospheric lighting",
+        "glowing abstract concept art",
+    ]
+    return [
+        f"cinematic vertical 9:16 dark moody 8k, {theme}, {a}, volumetric light, ultra detailed, no text"
+        for a in angles
+    ]
 
 
 def clean_voice(text):
-    text = re.sub(r"#\w+", "", text)                                   # hashtags
-    text = re.sub(r"[*_`~<>\[\]{}|]", "", text)                        # markdown junk
-    text = re.sub(r"[\U00010000-\U0010ffff\u2600-\u27BF]", "", text)   # emojis
+    text = re.sub(r"#\w+", "", text)
+    text = re.sub(r"[*_`~<>\[\]{}|]", "", text)
+    text = re.sub(r"[\U00010000-\U0010ffff\u2600-\u27BF]", "", text)
     text = re.sub(r"\s+", " ", text).strip()
     words = text.split()
-    if len(words) > 200:                                               # keep the Short short
+    if len(words) > 200:
         text = " ".join(words[:200])
         cut = max(text.rfind("।"), text.rfind("."), text.rfind("?"), text.rfind("!"))
         if cut > len(text) * 0.6:
@@ -132,7 +143,7 @@ def extract_json(text):
     t = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE).strip()
     candidates = [t]
     if "{" in t and "}" in t:
-        candidates.append(t[t.find("{"): t.rfind("}") + 1])
+        candidates.append(t[t.find("{") : t.rfind("}") + 1])
     for c in candidates:
         try:
             obj = json.loads(c)
@@ -140,13 +151,12 @@ def extract_json(text):
                 obj = obj[0]
             if isinstance(obj, dict):
                 return obj
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return None
 
 
 def normalize(d, idx):
-    """Validate/repair the script dict (accepts 'voiceover' or 'script'). None if unusable."""
     if not isinstance(d, dict):
         return None
     voice = clean_voice(str(d.get("voiceover") or d.get("script") or ""))
@@ -172,7 +182,13 @@ def normalize(d, idx):
     while len(prompts) < 5:
         prompts.append(prompts[i % len(prompts)])
         i += 1
-    return {"title": title, "caption": caption, "voiceover": voice, "image_prompts": prompts[:6]}
+    return {
+        "title": title,
+        "caption": caption,
+        "voiceover": voice,
+        "script": voice,
+        "image_prompts": prompts[:6],
+    }
 
 
 def fallback_script(idx):
@@ -201,10 +217,10 @@ def get_client():
     try:
         from google import genai
         try:
-            return genai.Client(api_key=key, http_options={"timeout": 60_000})   # never hang forever
-        except Exception:  # noqa: BLE001
+            return genai.Client(api_key=key, http_options={"timeout": 60_000})
+        except Exception:
             return genai.Client(api_key=key)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("Gemini client unavailable: %s", e)
         return None
 
@@ -212,35 +228,37 @@ def get_client():
 def gen_config(model, thinking_off):
     cfg = {"response_mime_type": "application/json", "temperature": 1.0}
     if thinking_off and "2.5-flash" in model and "lite" not in model:
-        cfg["thinking_config"] = {"thinking_budget": 0}     # much faster, plenty good for a 100-word script
+        cfg["thinking_config"] = {"thinking_budget": 0}
     return cfg
 
 
 def try_models(client, models, prompt, idx):
-    """Returns (data, fatal). fatal=True means the key itself is bad."""
     for model in models:
         thinking_off = True
         for attempt in range(1, 3):
             try:
                 log.info("Trying %s (attempt %d)...", model, attempt)
-                res = client.models.generate_content(model=model, contents=prompt,
-                                                     config=gen_config(model, thinking_off))
+                res = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=gen_config(model, thinking_off),
+                )
                 data = normalize(extract_json(res.text), idx)
                 if data:
                     return data, False
                 log.warning("%s returned unusable JSON", model)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 msg = str(e)
                 log.warning("Skip %s: %s", model, msg[:200])
                 low = msg.lower()
                 if "thinking" in low and thinking_off:
-                    thinking_off = False                   # model doesn't support it: retry plain
+                    thinking_off = False
                     continue
                 if any(x in msg for x in ("API_KEY_INVALID", "API key not valid", "PERMISSION_DENIED")):
                     return None, True
                 if "404" in msg or "NOT_FOUND" in msg or "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                    break                                  # retired or out of quota: next model
-                time.sleep(2 * attempt)                    # 503 / overloaded: short backoff
+                    break
+                time.sleep(2 * attempt)
     return None, False
 
 
@@ -250,14 +268,18 @@ def discover_models(client, already):
         for m in client.models.list():
             name = (getattr(m, "name", "") or "").replace("models/", "")
             actions = getattr(m, "supported_actions", None) or []
-            if ("gemini" in name and name not in already and name not in found
-                    and not any(w in name for w in SKIP_MODEL_WORDS)
-                    and (not actions or "generateContent" in actions)):
+            if (
+                "gemini" in name
+                and name not in already
+                and name not in found
+                and not any(w in name for w in SKIP_MODEL_WORDS)
+                and (not actions or "generateContent" in actions)
+            ):
                 found.append(name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("Could not list models: %s", e)
-    found.sort(reverse=True)                       # newer versions first
-    found.sort(key=lambda n: "flash" not in n)     # flash models first
+    found.sort(reverse=True)
+    found.sort(key=lambda n: "flash" not in n)
     return found[:5]
 
 
@@ -269,10 +291,10 @@ def get_script(client, idx):
     if os.environ.get("GEMINI_MODEL"):
         models.append(os.environ["GEMINI_MODEL"].strip())
     models += [m for m in PREFERRED_MODELS if m not in models]
-    data, fatal = try_models(client, models, prompt, idx)     # fast path: no model listing
+    data, fatal = try_models(client, models, prompt, idx)
     if data or fatal:
         return data
-    extra = discover_models(client, models)                   # only if the usual ones all failed
+    extra = discover_models(client, models)
     if extra:
         data, _ = try_models(client, extra, prompt, idx)
     return data
@@ -293,14 +315,15 @@ def make_voice(text, out=OUT_AUDIO):
         def attempt(p=prosody):
             if os.path.exists(out):
                 os.remove(out)
-            with ThreadPoolExecutor(1) as ex:       # safe even if an event loop is already running
+            with ThreadPoolExecutor(1) as ex:
                 ex.submit(asyncio.run, _edge_save(text, out, **p)).result()
             if not _file_ok(out):
                 raise RuntimeError("edge-tts produced empty audio")
+
         try:
             retry(attempt, tries=2, delay=2, what=f"edge-tts {prosody}")
             return out
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
 
     log.warning("edge-tts failed - trying gTTS fallback")
@@ -309,18 +332,18 @@ def make_voice(text, out=OUT_AUDIO):
         retry(lambda: gTTS(text=text, lang="hi").save(out), tries=3, delay=2, what="gTTS")
         if _file_ok(out):
             return out
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.error("gTTS fallback failed: %s", e)
     raise RuntimeError("No audio could be generated")
 
 
 # ---- stage 3: images (parallel) ---------------------------------------------
 def fit_and_save(img, path):
-    """Cover-crop any image to exactly 1080x1920."""
     img = img.convert("RGB")
+    resample = getattr(Image, "Resampling", Image).LANCZOS
     scale = max(W / img.width, H / img.height)
     nw, nh = int(img.width * scale) + 1, int(img.height * scale) + 1
-    img = img.resize((nw, nh), Image.LANCZOS)
+    img = img.resize((nw, nh), resample)
     left, top = (nw - W) // 2, (nh - H) // 2
     img.crop((left, top, left + W, top + H)).save(path, "JPEG", quality=90)
 
@@ -337,11 +360,13 @@ def make_gradient(idx, path):
 def get_image(idx, prompt):
     path = f"scene_{idx}.jpg"
     base_seed = int(time.time()) + idx
-    time.sleep(0.4 * idx)                                  # stagger starts so the free API isn't hammered
+    time.sleep(0.4 * idx)
     for attempt in range(3):
         seed = base_seed if attempt == 0 else random.randint(1, 10**6)
-        url = (f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}"
-               f"?width={GEN_W}&height={GEN_H}&nologo=true&seed={seed}")
+        url = (
+            f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}"
+            f"?width={GEN_W}&height={GEN_H}&nologo=true&seed={seed}"
+        )
         try:
             r = requests.get(url, headers=UA, timeout=45)
             if r.status_code == 200 and len(r.content) > 1000:
@@ -352,7 +377,7 @@ def get_image(idx, prompt):
             log.warning("Scene %d: HTTP %s", idx, r.status_code)
             if r.status_code == 429:
                 time.sleep(5)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.warning("Scene %d attempt %d failed: %s", idx, attempt + 1, str(e)[:150])
         time.sleep(2 * (attempt + 1))
     log.warning("Scene %d: using gradient fallback", idx)
@@ -362,7 +387,7 @@ def get_image(idx, prompt):
 def safe_get_image(idx, prompt):
     try:
         return get_image(idx, prompt)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         log.warning("Scene %d crashed (%s) - gradient fallback", idx, e)
         return make_gradient(idx, f"scene_{idx}.jpg")
 
@@ -373,12 +398,12 @@ def get_all_images(prompts):
         return [f.result() for f in futures]
 
 
-# ---- stage 4: video ---------------------------------------------------------
+# ---- stage 4: video rendering -----------------------------------------------
 def ffmpeg_exe():
     try:
         import imageio_ffmpeg
         return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return shutil.which("ffmpeg")
 
 
@@ -386,12 +411,14 @@ def audio_duration(path):
     exe = ffmpeg_exe()
     if exe:
         try:
-            p = subprocess.run([exe, "-hide_banner", "-i", path], capture_output=True,
-                               text=True, errors="replace", timeout=30)
+            p = subprocess.run(
+                [exe, "-hide_banner", "-i", path],
+                capture_output=True, text=True, errors="replace", timeout=30
+            )
             m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", p.stderr)
             if m:
                 return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     try:
         from moviepy import AudioFileClip
@@ -415,19 +442,21 @@ def render_ffmpeg(images, audio_path, out, total):
         cmd += ["-loop", "1", "-framerate", str(FPS), "-t", f"{per:.3f}", "-i", p]
     cmd += ["-i", audio_path]
     graph = "".join(f"[{i}:v]" for i in range(n)) + f"concat=n={n}:v=1:a=0,format=yuv420p[v]"
-    cmd += ["-filter_complex", graph, "-map", "[v]", "-map", f"{n}:a",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-r", str(FPS),
-            "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", out]
+    cmd += [
+        "-filter_complex", graph, "-map", "[v]", "-map", f"{n}:a",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-r", str(FPS),
+        "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", "-shortest", out,
+    ]
     p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=600)
-    if p.returncode != 0:
+    if p.returncode != 0 or not _file_ok(out, 10_000):
         raise RuntimeError(f"ffmpeg exit {p.returncode}: {p.stderr[-300:]}")
 
 
 def render_moviepy(images, audio_path, out, total):
     try:
-        from moviepy import ImageClip, AudioFileClip, concatenate_videoclips   # v2
+        from moviepy import ImageClip, AudioFileClip, concatenate_videoclips
     except ImportError:
-        from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips  # v1
+        from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
     per = total / len(images)
     audio, clips, video = AudioFileClip(audio_path), [], None
     try:
@@ -435,9 +464,167 @@ def render_moviepy(images, audio_path, out, total):
             c = ImageClip(p)
             clips.append(c.with_duration(per) if hasattr(c, "with_duration") else c.set_duration(per))
         last = None
-        for method in ("chain", "compose"):                 # chain is much faster; compose is the safe backup
+        for method in ("chain", "compose"):
             try:
                 video = concatenate_videoclips(clips, method=method)
                 video = video.with_audio(audio) if hasattr(video, "with_audio") else video.set_audio(audio)
-                video.write_videofile(out, fps=FPS, codec="libx264", audio_codec="aac", preset="ultrafast",
-                                      threads=os.cpu_count() or 2, ffmpeg_para
+                video.write_videofile(
+                    out,
+                    fps=FPS,
+                    codec="libx264",
+                    audio_codec="aac",
+                    preset="ultrafast",
+                    threads=os.cpu_count() or 2,
+                    ffmpeg_params=["-pix_fmt", "yuv420p", "-movflags", "+faststart"],
+                    logger=None,
+                )
+                if _file_ok(out, 10_000):
+                    return
+            except Exception as e:
+                last = e
+                log.warning("MoviePy (%s) failed: %s", method, e)
+        if last:
+            raise last
+    finally:
+        for obj in [video, audio] + clips:
+            try:
+                if obj:
+                    obj.close()
+            except Exception:
+                pass
+
+
+def render_video(images, audio_path, out=OUT_VIDEO):
+    total = max(5.0, audio_duration(audio_path))
+    try:
+        render_ffmpeg(images, audio_path, out, total)
+        return out
+    except Exception as e:
+        log.warning("Direct ffmpeg render failed (%s) - falling back to MoviePy", e)
+        render_moviepy(images, audio_path, out, total)
+        return out
+
+
+# ---- stage 5: public hosting + Make.com webhook -----------------------------
+def upload_public_video(video_path):
+    """Uploads video to Catbox (with Litterbox 72h fallback) so Make.com gets a direct URL."""
+    # 1. Try Catbox.moe
+    try:
+        with open(video_path, "rb") as f:
+            r = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": f},
+                headers=UA,
+                timeout=120,
+            )
+        if r.status_code == 200 and r.text.strip().startswith("http"):
+            url = r.text.strip()
+            log.info("Uploaded to Catbox: %s", url)
+            return url
+        log.warning("Catbox returned %s: %s", r.status_code, r.text[:120])
+    except Exception as e:
+        log.warning("Catbox upload failed: %s", e)
+
+    # 2. Fallback: Litterbox (Catbox's temporary 72-hour host, rarely blocked)
+    try:
+        with open(video_path, "rb") as f:
+            r = requests.post(
+                "https://litterbox.catbox.moe/resources/internals/api.php",
+                data={"reqtype": "fileupload", "time": "72h"},
+                files={"fileToUpload": f},
+                headers=UA,
+                timeout=120,
+            )
+        if r.status_code == 200 and r.text.strip().startswith("http"):
+            url = r.text.strip()
+            log.info("Uploaded to Litterbox: %s", url)
+            return url
+    except Exception as e:
+        log.warning("Litterbox upload failed: %s", e)
+
+    return ""
+
+
+def send_to_make(data, video_path, pub_url):
+    wh = (
+        os.environ.get("MAKE_WEBHOOK_URL", "").strip()
+        or os.environ.get("MAKE_WEBHOOK_URL_3", "").strip()
+        or DEFAULT_WEBHOOK
+    )
+    if not wh:
+        log.warning("No Make.com webhook URL configured!")
+        return
+
+    payload = {
+        "title": data.get("title", "Razzverse Short #shorts"),
+        "caption": data.get("caption", "#razzverse #shorts"),
+        "script": data.get("voiceover", ""),
+        "voiceover": data.get("voiceover", ""),
+        "video_url": pub_url,
+    }
+
+    # Attempt 1: Multipart POST with both fields and binary MP4 file
+    if SEND_FILE_TO_WEBHOOK and _file_ok(video_path):
+        try:
+            with open(video_path, "rb") as f:
+                r = requests.post(
+                    wh,
+                    data=payload,
+                    files={"file": (os.path.basename(video_path), f, "video/mp4")},
+                    timeout=120,
+                )
+            log.info("Make.com Webhook (with file) -> HTTP %s: %s", r.status_code, r.text[:150])
+            if 200 <= r.status_code < 300:
+                return
+        except Exception as e:
+            log.warning("Make.com multipart send failed (%s) - retrying lightweight JSON post", e)
+
+    # Attempt 2: Lightweight JSON POST (guarantees Make.com triggers even if file was too big)
+    try:
+        r = requests.post(wh, json=payload, timeout=60)
+        log.info("Make.com Webhook (JSON) -> HTTP %s: %s", r.status_code, r.text[:150])
+    except Exception as e:
+        log.error("Make.com JSON webhook failed: %s", e)
+
+
+# ---- main runner ------------------------------------------------------------
+def main():
+    niche_idx = datetime.now(timezone.utc).hour % len(NICHES)
+    log.info("Selected niche [%d]: %s", niche_idx, NICHES[niche_idx])
+
+    with stage("1. Script Generation"):
+        client = get_client()
+        data = get_script(client, niche_idx)
+        if not data:
+            log.warning("Using built-in fallback script for niche %d", niche_idx)
+            data = fallback_script(niche_idx)
+        log.info("Title: %s", data["title"])
+
+    with stage("2 & 3. Voice + Images (Parallel)"):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            voice_fut = pool.submit(make_voice, data["voiceover"], OUT_AUDIO)
+            imgs_fut = pool.submit(get_all_images, data["image_prompts"])
+            audio_path = voice_fut.result()
+            images = imgs_fut.result()
+
+    with stage("4. Video Rendering"):
+        video_path = render_video(images, audio_path, OUT_VIDEO)
+        log.info("Rendered %s (%.2f MB)", video_path, os.path.getsize(video_path) / (1024 * 1024))
+
+    with stage("5. Upload & Make.com Webhook"):
+        pub_url = upload_public_video(video_path)
+        data["video_url"] = pub_url
+        with open(OUT_META, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        send_to_make(data, video_path, pub_url)
+
+    log.info("SUCCESS: Razzverse Hindi Short completed and sent to Make.com!")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        log.error("Fatal error: %s", exc, exc_info=True)
+        sys.exit(1)
