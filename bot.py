@@ -63,3 +63,7 @@ clips = [get_clip(i, p) for i, p in enumerate(data["image_prompts"])]
 concatenate_videoclips(clips, method="compose").set_audio(audio).write_videofile("razzverse_short.mp4", fps=24, codec="libx264", audio_codec="aac")
 open("metadata.json", "w", encoding="utf-8").write(json.dumps({"title": data["title"], "caption": data["caption"], "niche": current_niche}, ensure_ascii=False))
 print("SUCCESS: Razzverse Hindi video rendered:", data["title"])
+wh = os.environ.get("MAKE_WEBHOOK_URL", "").strip()
+pub_url = requests.post("https://catbox.moe/user/api.php", data={"reqtype": "fileupload"}, files={"fileToUpload": open("razzverse_short.mp4", "rb")}).text.strip() if wh else ""
+if wh: requests.post(wh, data={"title": data["title"], "caption": data["caption"], "video_url": pub_url}, files={"video": ("razzverse_short.mp4", open("razzverse_short.mp4", "rb"), "video/mp4")})
+    
