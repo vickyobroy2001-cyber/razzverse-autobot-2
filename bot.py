@@ -1,630 +1,367 @@
 #!/usr/bin/env python3
 """
-Razzverse MASTER - Fast, Crash-Proof Hindi Shorts Bot with Direct Make.com Delivery.
+Razzverse MASTER - HD 3D Animated + MoneyPrinterTurbo + Brain Puzzle Edition
 """
-import os
-import re
-import sys
-import json
-import time
-import random
-import shutil
-import asyncio
-import logging
-import subprocess
-import urllib.parse
+import os, re, sys, math, json, time, wave, array, random, shutil, asyncio, logging, subprocess, urllib.parse
 from io import BytesIO
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
-
 import requests
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
-# ---- config -----------------------------------------------------------------
-def _env_int(name, default):
-    try:
-        return int(os.environ.get(name, default))
-    except (TypeError, ValueError):
-        return default
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("razzverse-hd")
 
-
-W, H = 1080, 1920
-GEN_W, GEN_H = _env_int("IMG_GEN_W", 720), _env_int("IMG_GEN_H", 1280)
-FPS = 24
-IMG_WORKERS = max(1, _env_int("IMG_WORKERS", 3))
-SEND_FILE_TO_WEBHOOK = os.environ.get("WEBHOOK_SEND_FILE", "1") != "0"
-
-# Direct Make.com Webhook URL baked in as automatic fallback
+W, H, FPS = 1080, 1920, 24
 DEFAULT_WEBHOOK = "https://hook.us2.make.com/dvt7x9d1fceu5vbr43snt0w8tyysw0dg"
-
-VOICE = os.environ.get("TTS_VOICE", "hi-IN-SwaraNeural")
-OUT_VIDEO, OUT_AUDIO, OUT_META = "razzverse_short.mp4", "voice.mp3", "metadata.json"
+OUT_VIDEO, OUT_AUDIO, OUT_BGM, OUT_META = "razzverse_short.mp4", "voice.mp3", "bgm.wav", "metadata.json"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-PREFERRED_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"]
-SKIP_MODEL_WORDS = (
-    "image", "tts", "live", "embedding", "veo", "imagen", "aqa",
-    "robotics", "computer", "audio", "gemma", "learnlm", "vision"
-)
 
 NICHES = [
-    "Psychology & Mind Tricks (दिमाग और व्यवहार के गहरे रहस्य)",
-    "Dark History & Untold Secrets (इतिहास के रहस्यमयी और अनसुने पन्ने)",
-    "Bizarre Facts & Mystery (दुनिया के अजीबोगरीब और चौंकाने वाले तथ्य)",
+    "Brain Puzzles, Detective Riddles & IQ Mind Training (दिमागी पहेलियाँ, जासूसी सवाल और IQ टेस्ट)",
+    "Psychology & Dark Mind Tricks (दिमाग और मानव व्यवहार के गहरे रहस्य)",
+    "Dark History & Untold Mysteries (इतिहास के रहस्यमयी और अनसुने पन्ने)",
+    "Bizarre Science & Shocking Facts (दुनिया के अजीबोगरीब और चौंकाने वाले तथ्य)",
     "Success, Money & Power Laws (सफलता, पैसा और शक्ति के मनोवैज्ञानिक नियम)",
 ]
 
-FALLBACKS = [
-    {
-        "title": "Eye Contact Ka Secret Trick #shorts #razzverse",
-        "caption": "Ye psychology trick try karke bataiye! #razzverse #hindishorts #psychology #mindtricks #shorts",
-        "theme": "two people talking, intense eye contact, psychology concept",
-        "voiceover": "क्या आपको पता है? जब आप किसी की आँखों में देखकर बात करते हो, तो सामने वाला आप पर ज़्यादा भरोसा करता है! साइकोलॉजी कहती है कि तीन सेकंड का आई कॉन्टैक्ट आपको कॉन्फिडेंट दिखाता है। अगली बार किसी से बात करो तो ये ट्रिक ज़रूर आज़माना। और हाँ, ऐसे ही मज़ेदार फैक्ट्स के लिए रज़्ज़वर्स को फॉलो करना मत भूलना!",
-    },
-    {
-        "title": "Jab Poora Shehar Nachne Laga #shorts #razzverse",
-        "caption": "Itihaas ka ajeeb sach! #razzverse #hindishorts #history #mystery #shorts",
-        "theme": "medieval European town square 1518, crowd dancing in a trance, dark eerie",
-        "voiceover": "क्या आप जानते हो कि 1518 में आज के फ्रांस के स्ट्रासबर्ग शहर में लोग अचानक नाचने लगे, और रुके ही नहीं? इसे डांसिंग प्लेग कहा जाता है! रिकॉर्ड्स के मुताबिक सैकड़ों लोग कई दिनों तक नाचते रहे, और कहा जाता है कि कुछ की थकान से जान भी चली गई। आज भी वैज्ञानिक इसकी असली वजह पर बहस करते हैं। ऐसे और रहस्यों के लिए रज़्ज़वर्स को फॉलो करो!",
-    },
-    {
-        "title": "Shahad Kabhi Kharab Kyun Nahi Hota? #shorts #razzverse",
-        "caption": "Science ka kamaal! #razzverse #hindishorts #facts #mystery #shorts",
-        "theme": "golden honey dripping, ancient Egyptian tomb, macro photography",
-        "voiceover": "क्या आप जानते हो कि शहद कभी खराब नहीं होता? वैज्ञानिकों को मिस्र के मकबरों में हज़ारों साल पुराना शहद मिला, जो आज भी खाने लायक था! इसकी वजह है शहद में बहुत कम पानी और नेचुरल एंटीबैक्टीरियल गुण। है ना कमाल की साइंस? और भी ऐसे रहस्यों के लिए रज़्ज़वर्स को फॉलो करो!",
-    },
-    {
-        "title": "80/20 Ka Secret Rule #shorts #razzverse",
-        "caption": "Pareto rule samjho! #razzverse #hindishorts #success #money #shorts",
-        "theme": "businessman at a glowing chessboard, golden coins, power and success concept",
-        "voiceover": "क्या आप जानते हो कि आपके 80 प्रतिशत नतीजे सिर्फ़ 20 प्रतिशत कामों से आते हैं? इसे पैरेटो रूल कहते हैं। इटली के इकोनॉमिस्ट विल्फ्रेडो पैरेटो ने देखा था कि वहाँ की ज़्यादातर ज़मीन बहुत थोड़े से लोगों के पास थी। आज भी ये नियम पैसे, बिज़नेस और टाइम पर लागू होता है। अपने वो बीस प्रतिशत काम ढूँढो जो असली नतीजे देते हैं! ऐसे और नियमों के लिए रज़्ज़वर्स को फॉलो करो!",
-    },
-]
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("razzverse")
-
-
-# ---- helpers ----------------------------------------------------------------
-@contextmanager
-def stage(name):
-    t = time.time()
-    log.info(">> %s", name)
-    try:
-        yield
-    finally:
-        log.info("<< %s finished in %.1fs", name, time.time() - t)
-
-
-def retry(fn, tries=3, delay=2, what="task"):
-    last = None
-    for i in range(1, tries + 1):
-        try:
-            return fn()
-        except Exception as e:
-            last = e
-            log.warning("%s failed (%d/%d): %s", what, i, tries, str(e)[:200])
-            if i < tries:
-                time.sleep(delay * i)
-    raise last
-
-
-def themed_prompts(theme):
-    angles = [
-        "wide establishing shot",
-        "close-up detail",
-        "dramatic low angle",
-        "moody atmospheric lighting",
-        "glowing abstract concept art",
+FALLBACK_PUZZLE = {
+    "title": "Sirf 1% Genius Hi Ye Paheli Suljha Sakte Hain! 🧠 #shorts #razzverse",
+    "caption": "Kya aapne sahi jawab pakda? Comment mein batao! 🧠🔥 #razzverse #paheli #riddles #iqtest #hindishorts #shorts",
+    "voiceover": "सिर्फ एक प्रतिशत जीनियस ही इस जासूसी पहेली का सही जवाब दे सकते हैं! ध्यान से सुनो। एक अमीर आदमी अपने घर में मृत पाया गया। पुलिस ने तीन लोगों से पूछताछ की। रसोइए ने कहा वो नाश्ता बना रहा था। माली ने कहा वो पौधों को पानी दे रहा था। और नौकरानी ने कहा वो रविवार की सुबह डाक बॉक्स से चिट्ठियाँ ला रही थी। जासूस ने तुरंत नौकरानी को गिरफ्तार कर लिया! बताओ क्यों? सोचो... तीन, दो, एक! क्योंकि रविवार को डाक नहीं आती! क्या आपने सही पहचाना? कमेंट करो और रज़्ज़वर्स को फॉलो करो!",
+    "search_terms": ["detective mystery", "thinking brain", "magnifying glass", "clock ticking", "genius mind", "crime scene"],
+    "image_prompts": [
+        "3D Unreal Engine 5 stylized animation vertical 9:16, mysterious detective standing in dark mansion, glowing clues, dramatic lighting, 8k HD",
+        "3D Unreal Engine 5 stylized animation vertical 9:16, glowing human brain with golden puzzle pieces connecting, cinematic dark neon, 8k HD",
+        "3D Unreal Engine 5 stylized animation vertical 9:16, three mysterious suspects in shadows under spotlight, suspense atmosphere, 8k HD",
+        "3D Unreal Engine 5 stylized animation vertical 9:16, vintage red mailbox in rain with glowing question mark, dramatic angle, 8k HD",
+        "3D Unreal Engine 5 stylized animation vertical 9:16, ticking golden pocket watch with glowing numbers 3 2 1, intense macro shot, 8k HD",
+        "3D Unreal Engine 5 stylized animation vertical 9:16, detective pointing finger with shocked revelation lighting, cinematic 8k HD"
     ]
-    return [
-        f"cinematic vertical 9:16 dark moody 8k, {theme}, {a}, volumetric light, ultra detailed, no text"
-        for a in angles
-    ]
+}
 
+def build_prompt(idx):
+    niche = NICHES[idx]
+    is_puzzle = (idx == 0)
+    style_rule = (
+        "Write an interactive BRAIN PUZZLE / DETECTIVE RIDDLE / MIND TRAINING TEST. "
+        "Start with a 3-second challenge hook ('सिर्फ 1% जीनियस ही...'). Present a short, clever mystery or brain puzzle with clues, "
+        "include a suspense countdown ('सोचो... तीन, दो, एक!'), and reveal the smart answer at the end asking viewers to comment if they got it right."
+        if is_puzzle else
+        "Start with a 3-second shocking hook. Keep pacing fast, suspenseful, and end with a mind-blowing twist or question."
+    )
+    return f"""You are the viral creator for 'Razzverse'. Write a 45-second YouTube Short in the niche: {niche}.
+{style_rule}
+Write 'voiceover' in natural spoken Hindi (Devanagari script) mixed with common English words in Devanagari, around 100 words. No emojis or hashtags inside voiceover.
+Provide 6 vivid 'image_prompts' in '3D Unreal Engine 5 stylized animation, vertical 9:16, dramatic glowing lighting, 8k HD, no text' style matching each part of the script, and 6 short English 'search_terms'.
+Return ONLY valid JSON:
+{{"title": "Catchy Hinglish Title #shorts #razzverse", "voiceover": "Spoken Hindi script...", "caption": "Engaging caption with 5 hashtags #razzverse #shorts", "search_terms": ["term1", "term2", "term3", "term4", "term5", "term6"], "image_prompts": ["3D animation prompt 1", "prompt 2", "prompt 3", "prompt 4", "prompt 5", "prompt 6"]}}"""
 
-def clean_voice(text):
-    text = re.sub(r"#\w+", "", text)
-    text = re.sub(r"[*_`~<>\[\]{}|]", "", text)
-    text = re.sub(r"[\U00010000-\U0010ffff\u2600-\u27BF]", "", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    words = text.split()
-    if len(words) > 200:
-        text = " ".join(words[:200])
-        cut = max(text.rfind("।"), text.rfind("."), text.rfind("?"), text.rfind("!"))
-        if cut > len(text) * 0.6:
-            text = text[: cut + 1]
-    return text
-
-
-def extract_json(text):
-    if not text:
-        return None
-    t = re.sub(r"^```(?:json)?\s*|\s*```$", "", text.strip(), flags=re.MULTILINE).strip()
-    candidates = [t]
-    if "{" in t and "}" in t:
-        candidates.append(t[t.find("{") : t.rfind("}") + 1])
-    for c in candidates:
-        try:
-            obj = json.loads(c)
-            if isinstance(obj, list) and obj:
-                obj = obj[0]
-            if isinstance(obj, dict):
-                return obj
-        except Exception:
-            continue
-    return None
-
-
-def normalize(d, idx):
-    if not isinstance(d, dict):
-        return None
-    voice = clean_voice(str(d.get("voiceover") or d.get("script") or ""))
-    if len(voice.split()) < 15:
-        return None
-
-    title = str(d.get("title") or "").strip()[:80].rstrip() or FALLBACKS[idx]["title"][:80]
-    if "#shorts" not in title.lower():
-        title += " #shorts"
-    title = title[:100]
-
-    caption = str(d.get("caption") or "").strip() or FALLBACKS[idx]["caption"]
-    if "#razzverse" not in caption.lower():
-        caption += " #razzverse"
-
-    raw_prompts = d.get("image_prompts") or []
-    if isinstance(raw_prompts, str):
-        raw_prompts = [raw_prompts]
-    prompts = [str(p).strip()[:400] for p in raw_prompts if str(p).strip()]
-    if not prompts:
-        prompts = themed_prompts(FALLBACKS[idx]["theme"])
-    i = 0
-    while len(prompts) < 5:
-        prompts.append(prompts[i % len(prompts)])
-        i += 1
-    return {
-        "title": title,
-        "caption": caption,
-        "voiceover": voice,
-        "script": voice,
-        "image_prompts": prompts[:6],
-    }
-
-
-def fallback_script(idx):
-    fb = dict(FALLBACKS[idx])
-    fb["image_prompts"] = themed_prompts(fb["theme"])
-    return normalize(fb, idx)
-
-
-# ---- stage 1: script (Gemini) -----------------------------------------------
-def build_prompt(niche):
-    return f"""You are the viral creator for 'Razzverse'. Write a 45-second YouTube Short / IG Reel in the niche: {niche}.
-Start with a 3-second shocking hook. Keep pacing fast, suspenseful, and end with a mind-blowing twist or question.
-Write the 'voiceover' in natural, conversational spoken Hindi (Devanagari script) mixed with common English words (written in Devanagari, e.g., साइकोलॉजी, ट्रिक, AI, रिसर्च) so the Hindi TTS pronounces it natively. Around 100 words.
-No emojis, hashtags, asterisks or stage directions inside the voiceover. Only state facts that are true.
-Return ONLY valid JSON with these exact keys:
-{{"title": "Catchy Hinglish Title under 60 chars #shorts #razzverse", "voiceover": "Spoken Hindi script in Devanagari...", "caption": "Engaging Hindi/Hinglish caption with 5 hashtags #razzverse #hindishorts", "image_prompts": ["cinematic vertical 9:16 dark moody detailed prompt 1", "prompt 2", "prompt 3", "prompt 4", "prompt 5"]}}"""
-
-
-def get_client():
-    raw = os.environ.get("GEMINI_API_KEY", "")
-    m = re.search(r"AIza[0-9A-Za-z\-_]{35}", raw)
-    key = m.group(0) if m else raw.strip()
+def get_script(idx):
+    raw_key = os.environ.get("GEMINI_API_KEY", "")
+    m = re.search(r"AIza[0-9A-Za-z\-_]{35}", raw_key)
+    key = m.group(0) if m else raw_key.strip()
     if not key:
-        log.warning("GEMINI_API_KEY is empty - will use fallback script")
-        return None
+        return FALLBACK_PUZZLE
+    prompt = build_prompt(idx)
     try:
         from google import genai
-        try:
-            return genai.Client(api_key=key, http_options={"timeout": 60_000})
-        except Exception:
-            return genai.Client(api_key=key)
-    except Exception as e:
-        log.warning("Gemini client unavailable: %s", e)
-        return None
-
-
-def gen_config(model, thinking_off):
-    cfg = {"response_mime_type": "application/json", "temperature": 1.0}
-    if thinking_off and "2.5-flash" in model and "lite" not in model:
-        cfg["thinking_config"] = {"thinking_budget": 0}
-    return cfg
-
-
-def try_models(client, models, prompt, idx):
-    for model in models:
-        thinking_off = True
-        for attempt in range(1, 3):
+        client = genai.Client(api_key=key)
+        for model in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
             try:
-                log.info("Trying %s (attempt %d)...", model, attempt)
-                res = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=gen_config(model, thinking_off),
-                )
-                data = normalize(extract_json(res.text), idx)
-                if data:
-                    return data, False
-                log.warning("%s returned unusable JSON", model)
+                log.info("Trying %s for niche [%d]...", model, idx)
+                res = client.models.generate_content(model=model, contents=prompt, config={"response_mime_type": "application/json"})
+                t = re.sub(r"^```(?:json)?\s*|\s*```$", "", (res.text or "").strip(), flags=re.MULTILINE).strip()
+                d = json.loads(t[t.find("{"):t.rfind("}")+1])
+                voice = re.sub(r"[#*_`~<>\[\]{}|]", "", str(d.get("voiceover") or d.get("script") or "")).strip()
+                if len(voice.split()) >= 18:
+                    prompts = [str(p) for p in (d.get("image_prompts") or FALLBACK_PUZZLE["image_prompts"])][:6]
+                    while len(prompts) < 6:
+                        prompts.append(FALLBACK_PUZZLE["image_prompts"][len(prompts) % 6])
+                    return {
+                        "title": str(d.get("title") or FALLBACK_PUZZLE["title"])[:95],
+                        "caption": str(d.get("caption") or FALLBACK_PUZZLE["caption"]),
+                        "voiceover": voice,
+                        "script": voice,
+                        "image_prompts": prompts
+                    }
             except Exception as e:
-                msg = str(e)
-                log.warning("Skip %s: %s", model, msg[:200])
-                low = msg.lower()
-                if "thinking" in low and thinking_off:
-                    thinking_off = False
-                    continue
-                if any(x in msg for x in ("API_KEY_INVALID", "API key not valid", "PERMISSION_DENIED")):
-                    return None, True
-                if "404" in msg or "NOT_FOUND" in msg or "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                    break
-                time.sleep(2 * attempt)
-    return None, False
-
-
-def discover_models(client, already):
-    found = []
-    try:
-        for m in client.models.list():
-            name = (getattr(m, "name", "") or "").replace("models/", "")
-            actions = getattr(m, "supported_actions", None) or []
-            if (
-                "gemini" in name
-                and name not in already
-                and name not in found
-                and not any(w in name for w in SKIP_MODEL_WORDS)
-                and (not actions or "generateContent" in actions)
-            ):
-                found.append(name)
+                log.warning("Skip %s: %s", model, str(e)[:120])
+                time.sleep(2)
     except Exception as e:
-        log.warning("Could not list models: %s", e)
-    found.sort(reverse=True)
-    found.sort(key=lambda n: "flash" not in n)
-    return found[:5]
+        log.warning("Gemini error: %s", e)
+    return FALLBACK_PUZZLE
 
-
-def get_script(client, idx):
-    if client is None:
-        return None
-    prompt = build_prompt(NICHES[idx])
-    models = []
-    if os.environ.get("GEMINI_MODEL"):
-        models.append(os.environ["GEMINI_MODEL"].strip())
-    models += [m for m in PREFERRED_MODELS if m not in models]
-    data, fatal = try_models(client, models, prompt, idx)
-    if data or fatal:
-        return data
-    extra = discover_models(client, models)
-    if extra:
-        data, _ = try_models(client, extra, prompt, idx)
-    return data
-
-
-# ---- stage 2: voice ---------------------------------------------------------
-async def _edge_save(text, out, **prosody):
+async def _edge_tts_stream(text, voice, out_audio):
     import edge_tts
-    await edge_tts.Communicate(text=text, voice=VOICE, **prosody).save(out)
+    comm = edge_tts.Communicate(text=text, voice=voice, rate="+8%")
+    subs = []
+    with open(out_audio, "wb") as f:
+        async for chunk in comm.stream():
+            if chunk["type"] == "audio":
+                f.write(chunk["data"])
+            elif chunk["type"] == "WordBoundary":
+                s = chunk["offset"] / 10_000_000.0
+                d = chunk["duration"] / 10_000_000.0
+                subs.append((s, s + d, chunk["text"]))
+    return subs
 
-
-def _file_ok(path, min_size=1000):
-    return os.path.exists(path) and os.path.getsize(path) > min_size
-
-
-def make_voice(text, out=OUT_AUDIO):
-    for prosody in ({"rate": "+10%", "pitch": "-2Hz"}, {"rate": "+10%"}, {}):
-        def attempt(p=prosody):
-            if os.path.exists(out):
-                os.remove(out)
-            with ThreadPoolExecutor(1) as ex:
-                ex.submit(asyncio.run, _edge_save(text, out, **p)).result()
-            if not _file_ok(out):
-                raise RuntimeError("edge-tts produced empty audio")
-
+def make_voice_and_subs(text, idx):
+    voice = os.environ.get("TTS_VOICE") or ("hi-IN-MadhurNeural" if idx % 2 == 0 else "hi-IN-SwaraNeural")
+    subs = []
+    for _ in range(2):
         try:
-            retry(attempt, tries=2, delay=2, what=f"edge-tts {prosody}")
-            return out
-        except Exception:
-            continue
-
-    log.warning("edge-tts failed - trying gTTS fallback")
-    try:
+            subs = asyncio.run(_edge_tts_stream(text, voice, OUT_AUDIO))
+            if os.path.exists(OUT_AUDIO) and os.path.getsize(OUT_AUDIO) > 1000:
+                break
+        except Exception as e:
+            log.warning("edge-tts retry: %s", e)
+    if not (os.path.exists(OUT_AUDIO) and os.path.getsize(OUT_AUDIO) > 1000):
         from gtts import gTTS
-        retry(lambda: gTTS(text=text, lang="hi").save(out), tries=3, delay=2, what="gTTS")
-        if _file_ok(out):
-            return out
-    except Exception as e:
-        log.error("gTTS fallback failed: %s", e)
-    raise RuntimeError("No audio could be generated")
+        gTTS(text=text, lang="hi").save(OUT_AUDIO)
 
+    phrases = []
+    if subs:
+        buf, c_start, c_end = [], 0.0, 0.0
+        for s, e, w in subs:
+            if not buf:
+                c_start = s
+            buf.append(w)
+            c_end = max(e, s + 0.15)
+            if len(buf) >= 4 or any(p in w for p in ("।", "?", "!", ",")):
+                phrases.append((c_start, c_end, " ".join(buf)))
+                buf = []
+        if buf:
+            phrases.append((c_start, c_end, " ".join(buf)))
+    return OUT_AUDIO, phrases
 
-# ---- stage 3: images (parallel) ---------------------------------------------
-def fit_and_save(img, path):
-    img = img.convert("RGB")
-    resample = getattr(Image, "Resampling", Image).LANCZOS
-    scale = max(W / img.width, H / img.height)
-    nw, nh = int(img.width * scale) + 1, int(img.height * scale) + 1
-    img = img.resize((nw, nh), resample)
-    left, top = (nw - W) // 2, (nh - H) // 2
-    img.crop((left, top, left + W, top + H)).save(path, "JPEG", quality=90)
+def generate_suspense_bgm(duration_sec, out_wav=OUT_BGM):
+    sr = 22050
+    total_samples = int((duration_sec + 2.0) * sr)
+    buf = array.array("h")
+    for i in range(total_samples):
+        t = i / sr
+        # Deep cinematic sub-bass drone (55Hz + 110Hz) + subtle puzzle clock tick every 0.5s
+        drone = 0.45 * math.sin(2 * math.pi * 55.0 * t) + 0.25 * math.sin(2 * math.pi * 110.0 * t)
+        lfo = 0.6 + 0.4 * math.sin(2 * math.pi * 0.25 * t)
+        phase = (t % 0.5)
+        tick = math.exp(-phase * 45.0) * math.sin(2 * math.pi * 880.0 * t) * 0.35 if phase < 0.08 else 0.0
+        val = int(max(-1.0, min(1.0, drone * lfo + tick)) * 14000)
+        buf.append(val)
+    with wave.open(out_wav, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(buf.tobytes())
+    return out_wav
 
-
-def make_gradient(idx, path):
-    top = [(32, 20, 70), (70, 20, 60), (15, 50, 80), (60, 40, 20), (20, 60, 50)][idx % 5]
-    bot = (8, 8, 20)
-    col = Image.new("RGB", (1, H))
-    col.putdata([tuple(int(top[c] + (bot[c] - top[c]) * y / H) for c in range(3)) for y in range(H)])
-    col.resize((W, H)).save(path, "JPEG", quality=90)
-    return path
-
-
-def get_image(idx, prompt):
+def get_hd_image(idx, prompt):
     path = f"scene_{idx}.jpg"
-    base_seed = int(time.time()) + idx
-    time.sleep(0.4 * idx)
+    time.sleep(0.35 * idx)
+    styled = f"{prompt}, 3D stylized animation, Unreal Engine 5 render, vibrant glowing contrast, sharp focus, vertical 9:16, no text"
     for attempt in range(3):
-        seed = base_seed if attempt == 0 else random.randint(1, 10**6)
-        url = (
-            f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}"
-            f"?width={GEN_W}&height={GEN_H}&nologo=true&seed={seed}"
-        )
+        seed = int(time.time()) + idx * 17 + attempt * 101
+        url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(styled)}?width={W}&height={H}&model=flux&nologo=true&seed={seed}"
         try:
             r = requests.get(url, headers=UA, timeout=45)
-            if r.status_code == 200 and len(r.content) > 1000:
-                img = Image.open(BytesIO(r.content))
-                img.load()
-                fit_and_save(img, path)
+            if r.status_code == 200 and len(r.content) > 5000:
+                img = Image.open(BytesIO(r.content)).convert("RGB")
+                resample = getattr(Image, "Resampling", Image).LANCZOS
+                img = img.resize((W, H), resample)
+                img = ImageEnhance.Contrast(img).enhance(1.12)
+                img = ImageEnhance.Color(img).enhance(1.15)
+                img.save(path, "JPEG", quality=95)
                 return path
-            log.warning("Scene %d: HTTP %s", idx, r.status_code)
-            if r.status_code == 429:
-                time.sleep(5)
         except Exception as e:
-            log.warning("Scene %d attempt %d failed: %s", idx, attempt + 1, str(e)[:150])
-        time.sleep(2 * (attempt + 1))
-    log.warning("Scene %d: using gradient fallback", idx)
-    return make_gradient(idx, path)
+            log.warning("Image %d retry %d: %s", idx, attempt + 1, str(e)[:100])
+            time.sleep(2)
+    img = Image.new("RGB", (W, H), (18, 12, 38))
+    img.save(path, "JPEG", quality=92)
+    return path
 
-
-def safe_get_image(idx, prompt):
-    try:
-        return get_image(idx, prompt)
-    except Exception as e:
-        log.warning("Scene %d crashed (%s) - gradient fallback", idx, e)
-        return make_gradient(idx, f"scene_{idx}.jpg")
-
-
-def get_all_images(prompts):
-    with ThreadPoolExecutor(max_workers=IMG_WORKERS) as ex:
-        futures = [ex.submit(safe_get_image, i, p) for i, p in enumerate(prompts)]
-        return [f.result() for f in futures]
-
-
-# ---- stage 4: video rendering -----------------------------------------------
 def ffmpeg_exe():
     try:
         import imageio_ffmpeg
         return imageio_ffmpeg.get_ffmpeg_exe()
     except Exception:
-        return shutil.which("ffmpeg")
+        return shutil.which("ffmpeg") or "ffmpeg"
 
+def get_audio_duration(exe, path):
+    p = subprocess.run([exe, "-hide_banner", "-i", path], capture_output=True, text=True, errors="replace")
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", p.stderr)
+    return (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))) if m else 40.0
 
-def audio_duration(path):
-    exe = ffmpeg_exe()
-    if exe:
-        try:
-            p = subprocess.run(
-                [exe, "-hide_banner", "-i", path],
-                capture_output=True, text=True, errors="replace", timeout=30
-            )
-            m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", p.stderr)
-            if m:
-                return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
-        except Exception:
-            pass
+def get_font():
+    for c in ["/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
+        if os.path.exists(c):
+            return ImageFont.truetype(c, 56)
     try:
-        from moviepy import AudioFileClip
-    except ImportError:
-        from moviepy.editor import AudioFileClip
-    clip = AudioFileClip(path)
-    try:
-        return clip.duration
-    finally:
-        clip.close()
+        if not os.path.exists("NotoDevanagari.ttf"):
+            r = requests.get("https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Bold.ttf", timeout=20)
+            if r.status_code == 200:
+                open("NotoDevanagari.ttf", "wb").write(r.content)
+        return ImageFont.truetype("NotoDevanagari.ttf", 56)
+    except Exception:
+        return ImageFont.load_default()
 
+def make_sub_banner(text, font, color_idx):
+    banner_h = 300
+    overlay = Image.new("RGBA", (W, banner_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    words = text.split()
+    lines = [" ".join(words[:3]), " ".join(words[3:])] if len(words) > 3 else [text]
+    lines = [l for l in lines if l.strip()]
+    accent = (255, 230, 0, 255) if color_idx % 2 == 0 else (0, 240, 255, 255)
 
-def render_ffmpeg(images, audio_path, out, total):
+    # Measure box
+    boxes = [draw.textbbox((0, 0), l, font=font) for l in lines]
+    max_w = max((b[2] - b[0]) for b in boxes) if boxes else 400
+    total_h = sum((b[3] - b[1]) for b in boxes) + 20 * len(lines)
+    pad_x, pad_y = 42, 26
+    bx1 = max(30, (W - max_w) // 2 - pad_x)
+    bx2 = min(W - 30, (W + max_w) // 2 + pad_x)
+    by1 = max(10, (banner_h - total_h) // 2 - pad_y)
+    by2 = min(banner_h - 10, (banner_h + total_h) // 2 + pad_y)
+
+    draw.rounded_rectangle([bx1, by1, bx2, by2], radius=28, fill=(10, 10, 22, 210), outline=accent, width=4)
+    curr_y = by1 + pad_y - 6
+    for l, b in zip(lines, boxes):
+        lw, lh = b[2] - b[0], b[3] - b[1]
+        lx = (W - lw) // 2
+        draw.text((lx, curr_y), l, font=font, fill=accent, stroke_width=4, stroke_fill=(0, 0, 0, 255))
+        curr_y += lh + 22
+    return overlay
+
+def animate_crop(img, u, mode):
+    # Smooth cosine easing for 3D camera motion (Zoom-In, Zoom-Out, Pan-LR, Pan-UD)
+    e = 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, u)))
+    if mode == 0:
+        scale = 1.0 + 0.18 * e
+        dx, dy = 0.5, 0.5
+    elif mode == 1:
+        scale = 1.18 - 0.18 * e
+        dx, dy = 0.5, 0.5
+    elif mode == 2:
+        scale = 1.15
+        dx, dy = e, 0.5
+    else:
+        scale = 1.15
+        dx, dy = 0.5, 1.0 - e
+    cw, ch = W / scale, H / scale
+    x1 = (W - cw) * dx
+    y1 = (H - ch) * dy
+    resample = getattr(Image, "Resampling", Image).BILINEAR
+    return img.resize((W, H), resample, box=(x1, y1, x1 + cw, y1 + ch))
+
+def render_animated_video(image_paths, audio_path, phrases, script_text):
     exe = ffmpeg_exe()
-    if not exe:
-        raise RuntimeError("ffmpeg not found")
-    n = len(images)
-    per = total / n
-    cmd = [exe, "-y", "-hide_banner", "-loglevel", "error"]
-    for p in images:
-        cmd += ["-loop", "1", "-framerate", str(FPS), "-t", f"{per:.3f}", "-i", p]
-    cmd += ["-i", audio_path]
-    graph = "".join(f"[{i}:v]" for i in range(n)) + f"concat=n={n}:v=1:a=0,format=yuv420p[v]"
-    cmd += [
-        "-filter_complex", graph, "-map", "[v]", "-map", f"{n}:a",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-r", str(FPS),
-        "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", "-shortest", out,
+    duration = max(6.0, get_audio_duration(exe, audio_path))
+    bgm_path = generate_suspense_bgm(duration)
+    font = get_font()
+
+    if not phrases:
+        words = script_text.split()
+        chunks = [" ".join(words[i:i+4]) for i in range(0, len(words), 4)] or ["Razzverse"]
+        cd = duration / len(chunks)
+        phrases = [(i * cd, (i + 1) * cd, ch) for i, ch in enumerate(chunks)]
+
+    # Pre-render subtitle banners once for speed
+    sub_banners = [(s, e, make_sub_banner(txt, font, idx)) for idx, (s, e, txt) in enumerate(phrases)]
+    imgs = [Image.open(p).convert("RGB").resize((W, H)) for p in image_paths]
+    n_scenes = len(imgs)
+    scene_dur = duration / n_scenes
+    total_frames = int(duration * FPS)
+    fade_sec = 0.35
+
+    cmd = [
+        exe, "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "rawvideo", "-vcodec", "rawvideo", "-s", f"{W}x{H}", "-pix_fmt", "rgb24", "-r", str(FPS), "-i", "-",
+        "-i", audio_path, "-i", bgm_path,
+        "-filter_complex", "[1:a]volume=1.0[va];[2:a]volume=0.14[ba];[va][ba]amix=inputs=2:duration=first:dropout_transition=2[outa]",
+        "-map", "0:v:0", "-map", "[outa]",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest", OUT_VIDEO
     ]
-    p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=600)
-    if p.returncode != 0 or not _file_ok(out, 10_000):
-        raise RuntimeError(f"ffmpeg exit {p.returncode}: {p.stderr[-300:]}")
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
+    for f_idx in range(total_frames):
+        t = f_idx / FPS
+        s_idx = min(n_scenes - 1, int(t / scene_dur))
+        local_t = t - s_idx * scene_dur
+        u = local_t / scene_dur
+        frame = animate_crop(imgs[s_idx], u, s_idx % 4)
 
-def render_moviepy(images, audio_path, out, total):
-    try:
-        from moviepy import ImageClip, AudioFileClip, concatenate_videoclips
-    except ImportError:
-        from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
-    per = total / len(images)
-    audio, clips, video = AudioFileClip(audio_path), [], None
-    try:
-        for p in images:
-            c = ImageClip(p)
-            clips.append(c.with_duration(per) if hasattr(c, "with_duration") else c.set_duration(per))
-        last = None
-        for method in ("chain", "compose"):
-            try:
-                video = concatenate_videoclips(clips, method=method)
-                video = video.with_audio(audio) if hasattr(video, "with_audio") else video.set_audio(audio)
-                video.write_videofile(
-                    out,
-                    fps=FPS,
-                    codec="libx264",
-                    audio_codec="aac",
-                    preset="ultrafast",
-                    threads=os.cpu_count() or 2,
-                    ffmpeg_params=["-pix_fmt", "yuv420p", "-movflags", "+faststart"],
-                    logger=None,
-                )
-                if _file_ok(out, 10_000):
-                    return
-            except Exception as e:
-                last = e
-                log.warning("MoviePy (%s) failed: %s", method, e)
-        if last:
-            raise last
-    finally:
-        for obj in [video, audio] + clips:
-            try:
-                if obj:
-                    obj.close()
-            except Exception:
-                pass
+        # Smooth crossfade to next scene
+        if s_idx < n_scenes - 1 and (scene_dur - local_t) < fade_sec:
+            alpha = 1.0 - (scene_dur - local_t) / fade_sec
+            next_frame = animate_crop(imgs[s_idx + 1], 0.0, (s_idx + 1) % 4)
+            frame = Image.blend(frame, next_frame, max(0.0, min(1.0, alpha)))
 
+        # Overlay MoneyPrinterTurbo pop-subtitle
+        for s, e, banner in sub_banners:
+            if s <= t <= e:
+                frame.paste(banner, (0, H - 470), banner)
+                break
 
-def render_video(images, audio_path, out=OUT_VIDEO):
-    total = max(5.0, audio_duration(audio_path))
-    try:
-        render_ffmpeg(images, audio_path, out, total)
-        return out
-    except Exception as e:
-        log.warning("Direct ffmpeg render failed (%s) - falling back to MoviePy", e)
-        render_moviepy(images, audio_path, out, total)
-        return out
+        # Top viral retention progress bar
+        draw = ImageDraw.Draw(frame)
+        prog_w = int(W * (t / duration))
+        draw.rectangle([0, 0, W, 12], fill=(30, 30, 45))
+        draw.rectangle([0, 0, prog_w, 12], fill=(255, 215, 0))
 
+        proc.stdin.write(frame.tobytes())
 
-# ---- stage 5: public hosting + Make.com webhook -----------------------------
-def upload_public_video(video_path):
-    """Uploads video to Catbox (with Litterbox 72h fallback) so Make.com gets a direct URL."""
-    # 1. Try Catbox.moe
-    try:
-        with open(video_path, "rb") as f:
-            r = requests.post(
-                "https://catbox.moe/user/api.php",
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": f},
-                headers=UA,
-                timeout=120,
-            )
-        if r.status_code == 200 and r.text.strip().startswith("http"):
-            url = r.text.strip()
-            log.info("Uploaded to Catbox: %s", url)
-            return url
-        log.warning("Catbox returned %s: %s", r.status_code, r.text[:120])
-    except Exception as e:
-        log.warning("Catbox upload failed: %s", e)
+    proc.stdin.close()
+    err = proc.stderr.read().decode("utf-8", errors="replace")
+    proc.wait(timeout=300)
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg encode failed: {err[-300:]}")
+    return OUT_VIDEO
 
-    # 2. Fallback: Litterbox (Catbox's temporary 72-hour host, rarely blocked)
-    try:
-        with open(video_path, "rb") as f:
-            r = requests.post(
-                "https://litterbox.catbox.moe/resources/internals/api.php",
-                data={"reqtype": "fileupload", "time": "72h"},
-                files={"fileToUpload": f},
-                headers=UA,
-                timeout=120,
-            )
-        if r.status_code == 200 and r.text.strip().startswith("http"):
-            url = r.text.strip()
-            log.info("Uploaded to Litterbox: %s", url)
-            return url
-    except Exception as e:
-        log.warning("Litterbox upload failed: %s", e)
-
-    return ""
-
-
-def send_to_make(data, video_path, pub_url):
-    wh = (
-        os.environ.get("MAKE_WEBHOOK_URL", "").strip()
-        or os.environ.get("MAKE_WEBHOOK_URL_3", "").strip()
-        or DEFAULT_WEBHOOK
-    )
-    if not wh:
-        log.warning("No Make.com webhook URL configured!")
-        return
-
-    payload = {
-        "title": data.get("title", "Razzverse Short #shorts"),
-        "caption": data.get("caption", "#razzverse #shorts"),
-        "script": data.get("voiceover", ""),
-        "voiceover": data.get("voiceover", ""),
-        "video_url": pub_url,
-    }
-
-    # Attempt 1: Multipart POST with both fields and binary MP4 file
-    if SEND_FILE_TO_WEBHOOK and _file_ok(video_path):
+def upload_and_notify(data):
+    wh = os.environ.get("MAKE_WEBHOOK_URL", "").strip() or os.environ.get("MAKE_WEBHOOK_URL_3", "").strip() or DEFAULT_WEBHOOK
+    pub_url = ""
+    for host, extra in [("https://catbox.moe/user/api.php", {}), ("https://litterbox.catbox.moe/resources/internals/api.php", {"time": "72h"})]:
         try:
-            with open(video_path, "rb") as f:
-                r = requests.post(
-                    wh,
-                    data=payload,
-                    files={"file": (os.path.basename(video_path), f, "video/mp4")},
-                    timeout=120,
-                )
-            log.info("Make.com Webhook (with file) -> HTTP %s: %s", r.status_code, r.text[:150])
-            if 200 <= r.status_code < 300:
-                return
+            with open(OUT_VIDEO, "rb") as f:
+                r = requests.post(host, data={"reqtype": "fileupload", **extra}, files={"fileToUpload": f}, headers=UA, timeout=120)
+            if r.status_code == 200 and r.text.strip().startswith("http"):
+                pub_url = r.text.strip()
+                log.info("Uploaded HD Video URL: %s", pub_url)
+                break
         except Exception as e:
-            log.warning("Make.com multipart send failed (%s) - retrying lightweight JSON post", e)
+            log.warning("Upload host warning: %s", e)
 
-    # Attempt 2: Lightweight JSON POST (guarantees Make.com triggers even if file was too big)
+    payload = {"title": data["title"], "caption": data["caption"], "script": data["voiceover"], "voiceover": data["voiceover"], "video_url": pub_url}
+    open(OUT_META, "w", encoding="utf-8").write(json.dumps(payload, ensure_ascii=False, indent=2))
+
     try:
-        r = requests.post(wh, json=payload, timeout=60)
-        log.info("Make.com Webhook (JSON) -> HTTP %s: %s", r.status_code, r.text[:150])
+        with open(OUT_VIDEO, "rb") as f:
+            r = requests.post(wh, data=payload, files={"file": (OUT_VIDEO, f, "video/mp4")}, timeout=120)
+        log.info("Make.com Webhook (file) status: %s", r.status_code)
+        if 200 <= r.status_code < 300:
+            return
     except Exception as e:
-        log.error("Make.com JSON webhook failed: %s", e)
+        log.warning("Multipart webhook fallback: %s", e)
+    r = requests.post(wh, json=payload, timeout=60)
+    log.info("Make.com Webhook (JSON) status: %s", r.status_code)
 
-
-# ---- main runner ------------------------------------------------------------
 def main():
-    niche_idx = datetime.now(timezone.utc).hour % len(NICHES)
-    log.info("Selected niche [%d]: %s", niche_idx, NICHES[niche_idx])
+    now = datetime.now(timezone.utc)
+    # Cycles evenly across all 5 niches (including Brain Puzzles & Riddles)
+    idx = (now.toordinal() * 4 + now.hour // 6) % len(NICHES)
+    log.info("Selected Niche [%d]: %s", idx, NICHES[idx])
+    data = get_script(idx)
+    log.info("Script Ready: %s", data["title"])
 
-    with stage("1. Script Generation"):
-        client = get_client()
-        data = get_script(client, niche_idx)
-        if not data:
-            log.warning("Using built-in fallback script for niche %d", niche_idx)
-            data = fallback_script(niche_idx)
-        log.info("Title: %s", data["title"])
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        vf = pool.submit(make_voice_and_subs, data["voiceover"], idx)
+        imf = pool.submit(lambda: [get_hd_image(i, p) for i, p in enumerate(data["image_prompts"])])
+        (audio_path, phrases), images = vf.result(), imf.result()
 
-    with stage("2 & 3. Voice + Images (Parallel)"):
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            voice_fut = pool.submit(make_voice, data["voiceover"], OUT_AUDIO)
-            imgs_fut = pool.submit(get_all_images, data["image_prompts"])
-            audio_path = voice_fut.result()
-            images = imgs_fut.result()
-
-    with stage("4. Video Rendering"):
-        video_path = render_video(images, audio_path, OUT_VIDEO)
-        log.info("Rendered %s (%.2f MB)", video_path, os.path.getsize(video_path) / (1024 * 1024))
-
-    with stage("5. Upload & Make.com Webhook"):
-        pub_url = upload_public_video(video_path)
-        data["video_url"] = pub_url
-        with open(OUT_META, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        send_to_make(data, video_path, pub_url)
-
-    log.info("SUCCESS: Razzverse Hindi Short completed and sent to Make.com!")
-
+    render_animated_video(images, audio_path, phrases, data["voiceover"])
+    upload_and_notify(data)
+    log.info("SUCCESS: HD Animated Video rendered and delivered to Make.com!")
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:
-        log.error("Fatal error: %s", exc, exc_info=True)
-        sys.exit(1)
+    main()
