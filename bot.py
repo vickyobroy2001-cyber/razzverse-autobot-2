@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Razzverse MASTER - HD 3D Animated + MoneyPrinterTurbo + Brain Puzzle Edition
+Razzverse MASTER v2 - Real Moving Stock Video + Auto Thumbnail + Daily Kids Rhymes Edition
 """
 import os, re, sys, math, json, time, wave, array, random, shutil, asyncio, logging, subprocess, urllib.parse
 from io import BytesIO
@@ -10,91 +10,240 @@ import requests
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-log = logging.getLogger("razzverse-hd")
+log = logging.getLogger("razzverse-v2")
 
 W, H, FPS = 1080, 1920, 24
 DEFAULT_WEBHOOK = "https://hook.us2.make.com/dvt7x9d1fceu5vbr43snt0w8tyysw0dg"
-OUT_VIDEO, OUT_AUDIO, OUT_BGM, OUT_META = "razzverse_short.mp4", "voice.mp3", "bgm.wav", "metadata.json"
+OUT_VIDEO = "razzverse_short.mp4"
+OUT_THUMB = "thumbnail.jpg"
+OUT_AUDIO = "voice.mp3"
+OUT_BGM = "bgm.wav"
+OUT_META = "metadata.json"
 UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
+# Niche 0 & 1 = Daily Two Types of Nursery Rhymes | Niche 2-6 = Original Razzverse Niches
 NICHES = [
-    "Brain Puzzles, Detective Riddles & IQ Mind Training (दिमागी पहेलियाँ, जासूसी सवाल और IQ टेस्ट)",
-    "Psychology & Dark Mind Tricks (दिमाग और मानव व्यवहार के गहरे रहस्य)",
-    "Dark History & Untold Mysteries (इतिहास के रहस्यमयी और अनसुने पन्ने)",
-    "Bizarre Science & Shocking Facts (दुनिया के अजीबोगरीब और चौंकाने वाले तथ्य)",
-    "Success, Money & Power Laws (सफलता, पैसा और शक्ति के मनोवैज्ञानिक नियम)",
+    {
+        "id": "rhyme_hindi",
+        "name": "Hindi Kids Nursery Rhyme & Action Song (मज़ेदार हिंदी बालगीत)",
+        "is_kids": True,
+        "lang": "hi",
+    },
+    {
+        "id": "rhyme_english",
+        "name": "English Nursery Rhyme, Counting & Animal Learning Song",
+        "is_kids": True,
+        "lang": "en",
+    },
+    {
+        "id": "brain_puzzle",
+        "name": "Brain Puzzles, Detective Riddles & IQ Mind Training",
+        "is_kids": False,
+        "lang": "hi",
+    },
+    {
+        "id": "psychology",
+        "name": "Psychology & Dark Mind Tricks",
+        "is_kids": False,
+        "lang": "hi",
+    },
+    {
+        "id": "dark_history",
+        "name": "Dark History & Untold Mysteries",
+        "is_kids": False,
+        "lang": "hi",
+    },
+    {
+        "id": "science_facts",
+        "name": "Bizarre Science & Shocking Facts",
+        "is_kids": False,
+        "lang": "hi",
+    },
+    {
+        "id": "success_laws",
+        "name": "Success, Money & Power Laws",
+        "is_kids": False,
+        "lang": "hi",
+    },
 ]
 
-FALLBACK_PUZZLE = {
-    "title": "Sirf 1% Genius Hi Ye Paheli Suljha Sakte Hain! 🧠 #shorts #razzverse",
-    "caption": "Kya aapne sahi jawab pakda? Comment mein batao! 🧠🔥 #razzverse #paheli #riddles #iqtest #hindishorts #shorts",
-    "voiceover": "सिर्फ एक प्रतिशत जीनियस ही इस जासूसी पहेली का सही जवाब दे सकते हैं! ध्यान से सुनो। एक अमीर आदमी अपने घर में मृत पाया गया। पुलिस ने तीन लोगों से पूछताछ की। रसोइए ने कहा वो नाश्ता बना रहा था। माली ने कहा वो पौधों को पानी दे रहा था। और नौकरानी ने कहा वो रविवार की सुबह डाक बॉक्स से चिट्ठियाँ ला रही थी। जासूस ने तुरंत नौकरानी को गिरफ्तार कर लिया! बताओ क्यों? सोचो... तीन, दो, एक! क्योंकि रविवार को डाक नहीं आती! क्या आपने सही पहचाना? कमेंट करो और रज़्ज़वर्स को फॉलो करो!",
-    "search_terms": ["detective mystery", "thinking brain", "magnifying glass", "clock ticking", "genius mind", "crime scene"],
-    "image_prompts": [
-        "3D Unreal Engine 5 stylized animation vertical 9:16, mysterious detective standing in dark mansion, glowing clues, dramatic lighting, 8k HD",
-        "3D Unreal Engine 5 stylized animation vertical 9:16, glowing human brain with golden puzzle pieces connecting, cinematic dark neon, 8k HD",
-        "3D Unreal Engine 5 stylized animation vertical 9:16, three mysterious suspects in shadows under spotlight, suspense atmosphere, 8k HD",
-        "3D Unreal Engine 5 stylized animation vertical 9:16, vintage red mailbox in rain with glowing question mark, dramatic angle, 8k HD",
-        "3D Unreal Engine 5 stylized animation vertical 9:16, ticking golden pocket watch with glowing numbers 3 2 1, intense macro shot, 8k HD",
-        "3D Unreal Engine 5 stylized animation vertical 9:16, detective pointing finger with shocked revelation lighting, cinematic 8k HD"
-    ]
+FALLBACK_SCRIPTS = {
+    "rhyme_hindi": {
+        "title": "Chuk Chuk Chali Railgaadi! 🚂 Fun Hindi Kids Rhyme #kids #rhymes #shorts",
+        "thumb_text": "CHUK CHUK RAIL!",
+        "caption": "Bacchon ke liye mazedaar naya Hindi Balgeet! 🚂✨ Like aur Subscribe karein! #hindirhymes #nurseryrhymes #kidssongs #balgeet #shorts",
+        "voiceover": (
+            "छुक छुक करती रेल चली, रंग बिरंगी खेल चली! "
+            "आगे इंजन सीटी मारे, पीछे डिब्बे नाचें सारे! "
+            "पप्पू बंदर बैठा आगे, हाथी राजा पीछे भागे! "
+            "हरा सिग्नल जब है आता, इंजन झट से दौड़ लगाता! "
+            "लाल बत्ती पर रुकती गाड़ी, हँसती खेलती दुनिया सारी! "
+            "बोलो बच्चों छुक छुक छुक, चलो चलें हम घूमने सब!"
+        ),
+        "search_terms": [
+            "colorful toy train kids",
+            "happy children playing",
+            "cute monkey animal",
+            "baby elephant walking",
+            "colorful balloons kids",
+            "children laughing park",
+        ],
+    },
+    "rhyme_english": {
+        "title": "Jump & Count 1 to 5! 🐰 Fun Animal Nursery Rhyme #nurseryrhymes #kids #shorts",
+        "thumb_text": "COUNT 1 TO 5!",
+        "caption": "Sing, jump, and count from 1 to 5 with cute animals! 🐰🎵 #nurseryrhymes #kidssongs #learning #preschool #shorts",
+        "voiceover": (
+            "One little bunny hopping in the sun, clap your hands and let us have some fun! "
+            "Two yellow ducklings swimming in the pond, quack quack quack all day long! "
+            "Three happy puppies wagging every tail, running down the sunny garden trail! "
+            "Four bright butterflies dancing in the sky, flapping pretty wings way up high! "
+            "Five shining stars twinkling in the night, count with me, one two three four five!"
+        ),
+        "search_terms": [
+            "cute bunny rabbit hopping",
+            "yellow ducklings swimming",
+            "happy puppies playing grass",
+            "colorful butterfly flying",
+            "twinkling night stars sky",
+            "happy kids clapping hands",
+        ],
+    },
+    "default": {
+        "title": "Sirf 1% Genius Hi Ye Paheli Suljha Sakte Hain! 🧠 #shorts #razzverse",
+        "thumb_text": "1% GENIUS TEST!",
+        "caption": "Kya aapne sahi jawab pakda? Comment mein batao! 🧠🔥 #razzverse #paheli #riddles #iqtest #shorts",
+        "voiceover": (
+            "सिर्फ एक प्रतिशत जीनियस ही इस जासूसी पहेली का सही जवाब दे सकते हैं! ध्यान से सुनो। "
+            "एक अमीर आदमी अपने घर में मृत पाया गया। पुलिस ने तीन लोगों से पूछताछ की। "
+            "रसोइए ने कहा वो नाश्ता बना रहा था। माली ने कहा वो पौधों को पानी दे रहा था। "
+            "और नौकरानी ने कहा वो रविवार की सुबह डाक बॉक्स से चिट्ठियाँ ला रही थी। "
+            "जासूस ने तुरंत नौकरानी को गिरफ्तार कर लिया! बताओ क्यों? "
+            "सोचो... तीन, दो, एक! क्योंकि रविवार को डाक नहीं आती! क्या आपने सही पहचाना? कमेंट करो!"
+        ),
+        "search_terms": [
+            "detective mystery night",
+            "glowing brain technology",
+            "magnifying glass clues",
+            "vintage mailbox rain",
+            "clock ticking macro",
+            "shocked person thinking",
+        ],
+    },
 }
 
-def build_prompt(idx):
-    niche = NICHES[idx]
-    is_puzzle = (idx == 0)
-    style_rule = (
-        "Write an interactive BRAIN PUZZLE / DETECTIVE RIDDLE / MIND TRAINING TEST. "
-        "Start with a 3-second challenge hook ('सिर्फ 1% जीनियस ही...'). Present a short, clever mystery or brain puzzle with clues, "
-        "include a suspense countdown ('सोचो... तीन, दो, एक!'), and reveal the smart answer at the end asking viewers to comment if they got it right."
-        if is_puzzle else
-        "Start with a 3-second shocking hook. Keep pacing fast, suspenseful, and end with a mind-blowing twist or question."
-    )
-    return f"""You are the viral creator for 'Razzverse'. Write a 45-second YouTube Short in the niche: {niche}.
-{style_rule}
-Write 'voiceover' in natural spoken Hindi (Devanagari script) mixed with common English words in Devanagari, around 100 words. No emojis or hashtags inside voiceover.
-Provide 6 vivid 'image_prompts' in '3D Unreal Engine 5 stylized animation, vertical 9:16, dramatic glowing lighting, 8k HD, no text' style matching each part of the script, and 6 short English 'search_terms'.
-Return ONLY valid JSON:
-{{"title": "Catchy Hinglish Title #shorts #razzverse", "voiceover": "Spoken Hindi script...", "caption": "Engaging caption with 5 hashtags #razzverse #shorts", "search_terms": ["term1", "term2", "term3", "term4", "term5", "term6"], "image_prompts": ["3D animation prompt 1", "prompt 2", "prompt 3", "prompt 4", "prompt 5", "prompt 6"]}}"""
 
-def get_script(idx):
+def ffmpeg_exe():
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return shutil.which("ffmpeg") or "ffmpeg"
+
+
+def get_audio_duration(exe, path):
+    p = subprocess.run([exe, "-hide_banner", "-i", path], capture_output=True, text=True, errors="replace")
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", p.stderr)
+    return (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))) if m else 35.0
+
+
+def build_prompt(niche):
+    nid = niche["id"]
+    if nid == "rhyme_hindi":
+        topics = [
+            "a playful wooden toy horse galloping through a village fair",
+            "a colorful chuk-chuk toy train with funny animals",
+            "dancing raindrops, paper boats, and happy peacocks",
+            "a twinkling moon, stars, and a sleepy little kitten",
+            "a cheerful little fish swimming in a sparkling river",
+            "a friendly elephant and a naughty monkey eating mangoes",
+        ]
+        topic = random.choice(topics)
+        return f"""Write a 100% ORIGINAL, super catchy 35-second Hindi Nursery Rhyme (Balgeet) for young kids about: {topic}.
+Do NOT copy any existing movie song or copyrighted lyrics. Invent fresh, simple, bouncy rhyming lines in Devanagari Hindi (about 65-85 words) that kids love to repeat. No emojis inside voiceover.
+Provide 6 joyful, concrete English 'search_terms' (2-3 words each) that will find bright real-life or animated stock videos on Pexels/Pixabay (e.g., "happy puppy playing", "colorful balloons", "cute horse running").
+Provide 'thumb_text': 2 to 4 short punchy ALL-CAPS Hinglish words for the video thumbnail (e.g., "NANHA GHODA!").
+Return ONLY valid JSON:
+{{"title": "Catchy Hinglish Kids Rhyme Title #hindirhymes #shorts", "thumb_text": "SHORT HOOK!", "voiceover": "Original Hindi rhyme...", "caption": "Fun description with 5 kids hashtags", "search_terms": ["term1","term2","term3","term4","term5","term6"]}}"""
+
+    if nid == "rhyme_english":
+        topics = [
+            "counting 1 to 5 with cute jumping animals",
+            "learning rainbow colors with fruits and balloons",
+            "happy animal sounds on a sunny farm",
+            "wheels, boats, and airplanes zooming around",
+            "brushing teeth and getting ready with a smile",
+            "twinkling stars, sun, and fluffy clouds",
+        ]
+        topic = random.choice(topics)
+        return f"""Write a 100% ORIGINAL, joyful 35-second English Nursery Rhyme & learning song for toddlers about: {topic}.
+Use simple, bouncy rhyming couplets (about 65-85 words). No emojis inside voiceover.
+Provide 6 vivid English 'search_terms' (2-3 words each) that match bright kids/animal/nature stock videos on Pexels/Pixabay.
+Provide 'thumb_text': 2 to 4 short punchy ALL-CAPS English words for the thumbnail (e.g., "COUNT WITH ME!").
+Return ONLY valid JSON:
+{{"title": "Catchy English Kids Song Title #nurseryrhymes #shorts", "thumb_text": "SHORT HOOK!", "voiceover": "Original English rhyme...", "caption": "Fun description with 5 kids hashtags", "search_terms": ["term1","term2","term3","term4","term5","term6"]}}"""
+
+    is_puzzle = (nid == "brain_puzzle")
+    style = (
+        "Write an interactive detective riddle / IQ test with a 3-second hook ('सिर्फ 1% जीनियस ही...'), clues, a 3-2-1 countdown, and a clever reveal."
+        if is_puzzle else
+        "Start with a 3-second shocking hook, fast pacing, and end with a mind-blowing twist."
+    )
+    return f"""You are a viral YouTube Shorts creator for 'Razzverse'. Niche: {niche['name']}.
+{style}
+Write 'voiceover' in natural spoken Hindi (Devanagari script, ~90 words, no emojis/hashtags inside voiceover).
+Provide 6 cinematic English 'search_terms' (2-3 words each) that match stock video clips on Pexels/Pixabay.
+Provide 'thumb_text': 2 to 4 short punchy ALL-CAPS Hinglish words for the thumbnail.
+Return ONLY valid JSON:
+{{"title": "Catchy Hinglish Title #shorts #razzverse", "thumb_text": "SHORT HOOK!", "voiceover": "Spoken Hindi script...", "caption": "Engaging caption with 5 hashtags", "search_terms": ["term1","term2","term3","term4","term5","term6"]}}"""
+
+
+def get_script(niche):
+    fallback = FALLBACK_SCRIPTS.get(niche["id"], FALLBACK_SCRIPTS["default"])
     raw_key = os.environ.get("GEMINI_API_KEY", "")
     m = re.search(r"AIza[0-9A-Za-z\-_]{35}", raw_key)
     key = m.group(0) if m else raw_key.strip()
     if not key:
-        return FALLBACK_PUZZLE
-    prompt = build_prompt(idx)
+        log.warning("GEMINI_API_KEY missing; using fallback script.")
+        return fallback
+
+    prompt = build_prompt(niche)
     try:
         from google import genai
         client = genai.Client(api_key=key)
-        for model in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+        for model in ["gemini-2.5-flash", "gemini-2.0-flash"]:
             try:
-                log.info("Trying %s for niche [%d]...", model, idx)
-                res = client.models.generate_content(model=model, contents=prompt, config={"response_mime_type": "application/json"})
+                log.info("Generating script via %s for [%s]...", model, niche["id"])
+                res = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config={"response_mime_type": "application/json"},
+                )
                 t = re.sub(r"^```(?:json)?\s*|\s*```$", "", (res.text or "").strip(), flags=re.MULTILINE).strip()
-                d = json.loads(t[t.find("{"):t.rfind("}")+1])
-                voice = re.sub(r"[#*_`~<>\[\]{}|]", "", str(d.get("voiceover") or d.get("script") or "")).strip()
+                d = json.loads(t[t.find("{"):t.rfind("}") + 1])
+                voice = re.sub(r"[#*_`~<>\[\]{}|]", "", str(d.get("voiceover") or "")).strip()
+                terms = [str(x).strip() for x in (d.get("search_terms") or []) if str(x).strip()][:6]
+                while len(terms) < 6:
+                    terms.append(fallback["search_terms"][len(terms) % len(fallback["search_terms"])])
                 if len(voice.split()) >= 18:
-                    prompts = [str(p) for p in (d.get("image_prompts") or FALLBACK_PUZZLE["image_prompts"])][:6]
-                    while len(prompts) < 6:
-                        prompts.append(FALLBACK_PUZZLE["image_prompts"][len(prompts) % 6])
                     return {
-                        "title": str(d.get("title") or FALLBACK_PUZZLE["title"])[:95],
-                        "caption": str(d.get("caption") or FALLBACK_PUZZLE["caption"]),
+                        "title": str(d.get("title") or fallback["title"])[:95],
+                        "thumb_text": str(d.get("thumb_text") or fallback["thumb_text"])[:28].upper(),
+                        "caption": str(d.get("caption") or fallback["caption"]),
                         "voiceover": voice,
-                        "script": voice,
-                        "image_prompts": prompts
+                        "search_terms": terms,
                     }
             except Exception as e:
-                log.warning("Skip %s: %s", model, str(e)[:120])
+                log.warning("Model %s skipped: %s", model, str(e)[:120])
                 time.sleep(2)
     except Exception as e:
         log.warning("Gemini error: %s", e)
-    return FALLBACK_PUZZLE
+    return fallback
 
-async def _edge_tts_stream(text, voice, out_audio):
+
+async def _edge_tts_stream(text, voice, rate, pitch, out_audio):
     import edge_tts
-    comm = edge_tts.Communicate(text=text, voice=voice, rate="+8%")
+    comm = edge_tts.Communicate(text=text, voice=voice, rate=rate, pitch=pitch)
     subs = []
     with open(out_audio, "wb") as f:
         async for chunk in comm.stream():
@@ -106,19 +255,27 @@ async def _edge_tts_stream(text, voice, out_audio):
                 subs.append((s, s + d, chunk["text"]))
     return subs
 
-def make_voice_and_subs(text, idx):
-    voice = os.environ.get("TTS_VOICE") or ("hi-IN-MadhurNeural" if idx % 2 == 0 else "hi-IN-SwaraNeural")
+
+def make_voice_and_subs(text, niche):
+    if niche["id"] == "rhyme_hindi":
+        voice, rate, pitch = "hi-IN-SwaraNeural", "+4%", "+12Hz"
+    elif niche["id"] == "rhyme_english":
+        voice, rate, pitch = "en-US-AnaNeural", "+2%", "+8Hz"
+    else:
+        voice, rate, pitch = "hi-IN-MadhurNeural", "+8%", "+0Hz"
+
     subs = []
     for _ in range(2):
         try:
-            subs = asyncio.run(_edge_tts_stream(text, voice, OUT_AUDIO))
+            subs = asyncio.run(_edge_tts_stream(text, voice, rate, pitch, OUT_AUDIO))
             if os.path.exists(OUT_AUDIO) and os.path.getsize(OUT_AUDIO) > 1000:
                 break
         except Exception as e:
             log.warning("edge-tts retry: %s", e)
+
     if not (os.path.exists(OUT_AUDIO) and os.path.getsize(OUT_AUDIO) > 1000):
         from gtts import gTTS
-        gTTS(text=text, lang="hi").save(OUT_AUDIO)
+        gTTS(text=text, lang=niche["lang"]).save(OUT_AUDIO)
 
     phrases = []
     if subs:
@@ -127,27 +284,48 @@ def make_voice_and_subs(text, idx):
             if not buf:
                 c_start = s
             buf.append(w)
-            c_end = max(e, s + 0.15)
-            if len(buf) >= 4 or any(p in w for p in ("।", "?", "!", ",")):
+            c_end = max(e, s + 0.18)
+            if len(buf) >= 4 or any(p in w for p in ("।", "?", "!", ",", ".")):
                 phrases.append((c_start, c_end, " ".join(buf)))
                 buf = []
         if buf:
             phrases.append((c_start, c_end, " ".join(buf)))
     return OUT_AUDIO, phrases
 
-def generate_suspense_bgm(duration_sec, out_wav=OUT_BGM):
+
+def generate_bgm(duration_sec, is_kids, out_wav=OUT_BGM):
     sr = 22050
     total_samples = int((duration_sec + 2.0) * sr)
     buf = array.array("h")
-    for i in range(total_samples):
-        t = i / sr
-        # Deep cinematic sub-bass drone (55Hz + 110Hz) + subtle puzzle clock tick every 0.5s
-        drone = 0.45 * math.sin(2 * math.pi * 55.0 * t) + 0.25 * math.sin(2 * math.pi * 110.0 * t)
-        lfo = 0.6 + 0.4 * math.sin(2 * math.pi * 0.25 * t)
-        phase = (t % 0.5)
-        tick = math.exp(-phase * 45.0) * math.sin(2 * math.pi * 880.0 * t) * 0.35 if phase < 0.08 else 0.0
-        val = int(max(-1.0, min(1.0, drone * lfo + tick)) * 14000)
-        buf.append(val)
+
+    if is_kids:
+        # Cheerful playful C-major xylophone/music-box melody for kids rhymes
+        melody = [523.25, 659.25, 783.99, 659.25, 880.00, 783.99, 659.25, 587.33,
+                  523.25, 587.33, 659.25, 783.99, 1046.50, 783.99, 659.25, 523.25]
+        bass = [261.63, 261.63, 392.00, 392.00, 349.23, 349.23, 392.00, 261.63]
+        beat_len = 0.32
+        for i in range(total_samples):
+            t = i / sr
+            b_idx = int(t / beat_len)
+            bt = t - b_idx * beat_len
+            freq = melody[b_idx % len(melody)]
+            bfreq = bass[(b_idx // 2) % len(bass)]
+            env = math.exp(-bt * 8.5)
+            tone = (0.55 * math.sin(2 * math.pi * freq * t) + 0.2 * math.sin(4 * math.pi * freq * t)) * env
+            warm = 0.22 * math.sin(2 * math.pi * bfreq * t) * math.exp(-bt * 3.0)
+            val = int(max(-1.0, min(1.0, tone + warm)) * 13000)
+            buf.append(val)
+    else:
+        # Cinematic suspense drone + soft clock tick for puzzles & mysteries
+        for i in range(total_samples):
+            t = i / sr
+            drone = 0.45 * math.sin(2 * math.pi * 55.0 * t) + 0.25 * math.sin(2 * math.pi * 110.0 * t)
+            lfo = 0.6 + 0.4 * math.sin(2 * math.pi * 0.25 * t)
+            phase = t % 0.5
+            tick = math.exp(-phase * 45.0) * math.sin(2 * math.pi * 880.0 * t) * 0.35 if phase < 0.08 else 0.0
+            val = int(max(-1.0, min(1.0, drone * lfo + tick)) * 14000)
+            buf.append(val)
+
     with wave.open(out_wav, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
@@ -155,213 +333,115 @@ def generate_suspense_bgm(duration_sec, out_wav=OUT_BGM):
         wf.writeframes(buf.tobytes())
     return out_wav
 
-def get_hd_image(idx, prompt):
-    path = f"scene_{idx}.jpg"
-    time.sleep(0.35 * idx)
-    styled = f"{prompt}, 3D stylized animation, Unreal Engine 5 render, vibrant glowing contrast, sharp focus, vertical 9:16, no text"
-    for attempt in range(3):
-        seed = int(time.time()) + idx * 17 + attempt * 101
-        url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(styled)}?width={W}&height={H}&model=flux&nologo=true&seed={seed}"
+
+def _fetch_pexels_video(query, used_ids):
+    key = os.environ.get("PEXELS_API_KEY", "").strip()
+    if not key:
+        return None
+    headers = {"Authorization": key, **UA}
+    for orient in ("portrait", ""):
         try:
-            r = requests.get(url, headers=UA, timeout=45)
-            if r.status_code == 200 and len(r.content) > 5000:
-                img = Image.open(BytesIO(r.content)).convert("RGB")
-                resample = getattr(Image, "Resampling", Image).LANCZOS
-                img = img.resize((W, H), resample)
-                img = ImageEnhance.Contrast(img).enhance(1.12)
-                img = ImageEnhance.Color(img).enhance(1.15)
-                img.save(path, "JPEG", quality=95)
-                return path
+            params = {"query": query, "per_page": 10}
+            if orient:
+                params["orientation"] = orient
+            r = requests.get("https://api.pexels.com/videos/search", headers=headers, params=params, timeout=20)
+            if r.status_code != 200:
+                continue
+            for v in r.json().get("videos", []):
+                vid = f"pexels_{v.get('id')}"
+                if vid in used_ids:
+                    continue
+                files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4" and f.get("link")]
+                if not files:
+                    continue
+                # Prefer 720p-1080p clips so download & render stay fast and crisp
+                files.sort(key=lambda f: abs((f.get("height") or 720) - 1280))
+                used_ids.add(vid)
+                return files[0]["link"]
         except Exception as e:
-            log.warning("Image %d retry %d: %s", idx, attempt + 1, str(e)[:100])
-            time.sleep(2)
-    img = Image.new("RGB", (W, H), (18, 12, 38))
-    img.save(path, "JPEG", quality=92)
-    return path
+            log.warning("Pexels search warning (%s): %s", query, str(e)[:100])
+    return None
 
-def ffmpeg_exe():
+
+def _fetch_pixabay_video(query, used_ids):
+    key = os.environ.get("PIXABAY_API_KEY", "").strip()
+    if not key:
+        return None
     try:
-        import imageio_ffmpeg
-        return imageio_ffmpeg.get_ffmpeg_exe()
-    except Exception:
-        return shutil.which("ffmpeg") or "ffmpeg"
-
-def get_audio_duration(exe, path):
-    p = subprocess.run([exe, "-hide_banner", "-i", path], capture_output=True, text=True, errors="replace")
-    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", p.stderr)
-    return (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))) if m else 40.0
-
-def get_font():
-    for c in ["/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]:
-        if os.path.exists(c):
-            return ImageFont.truetype(c, 56)
-    try:
-        if not os.path.exists("NotoDevanagari.ttf"):
-            r = requests.get("https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansDevanagari/NotoSansDevanagari-Bold.ttf", timeout=20)
-            if r.status_code == 200:
-                open("NotoDevanagari.ttf", "wb").write(r.content)
-        return ImageFont.truetype("NotoDevanagari.ttf", 56)
-    except Exception:
-        return ImageFont.load_default()
-
-def make_sub_banner(text, font, color_idx):
-    banner_h = 300
-    overlay = Image.new("RGBA", (W, banner_h), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(overlay)
-    words = text.split()
-    lines = [" ".join(words[:3]), " ".join(words[3:])] if len(words) > 3 else [text]
-    lines = [l for l in lines if l.strip()]
-    accent = (255, 230, 0, 255) if color_idx % 2 == 0 else (0, 240, 255, 255)
-
-    # Measure box
-    boxes = [draw.textbbox((0, 0), l, font=font) for l in lines]
-    max_w = max((b[2] - b[0]) for b in boxes) if boxes else 400
-    total_h = sum((b[3] - b[1]) for b in boxes) + 20 * len(lines)
-    pad_x, pad_y = 42, 26
-    bx1 = max(30, (W - max_w) // 2 - pad_x)
-    bx2 = min(W - 30, (W + max_w) // 2 + pad_x)
-    by1 = max(10, (banner_h - total_h) // 2 - pad_y)
-    by2 = min(banner_h - 10, (banner_h + total_h) // 2 + pad_y)
-
-    draw.rounded_rectangle([bx1, by1, bx2, by2], radius=28, fill=(10, 10, 22, 210), outline=accent, width=4)
-    curr_y = by1 + pad_y - 6
-    for l, b in zip(lines, boxes):
-        lw, lh = b[2] - b[0], b[3] - b[1]
-        lx = (W - lw) // 2
-        draw.text((lx, curr_y), l, font=font, fill=accent, stroke_width=4, stroke_fill=(0, 0, 0, 255))
-        curr_y += lh + 22
-    return overlay
-
-def animate_crop(img, u, mode):
-    # Smooth cosine easing for 3D camera motion (Zoom-In, Zoom-Out, Pan-LR, Pan-UD)
-    e = 0.5 - 0.5 * math.cos(math.pi * max(0.0, min(1.0, u)))
-    if mode == 0:
-        scale = 1.0 + 0.18 * e
-        dx, dy = 0.5, 0.5
-    elif mode == 1:
-        scale = 1.18 - 0.18 * e
-        dx, dy = 0.5, 0.5
-    elif mode == 2:
-        scale = 1.15
-        dx, dy = e, 0.5
-    else:
-        scale = 1.15
-        dx, dy = 0.5, 1.0 - e
-    cw, ch = W / scale, H / scale
-    x1 = (W - cw) * dx
-    y1 = (H - ch) * dy
-    resample = getattr(Image, "Resampling", Image).BILINEAR
-    return img.resize((W, H), resample, box=(x1, y1, x1 + cw, y1 + ch))
-
-def render_animated_video(image_paths, audio_path, phrases, script_text):
-    exe = ffmpeg_exe()
-    duration = max(6.0, get_audio_duration(exe, audio_path))
-    bgm_path = generate_suspense_bgm(duration)
-    font = get_font()
-
-    if not phrases:
-        words = script_text.split()
-        chunks = [" ".join(words[i:i+4]) for i in range(0, len(words), 4)] or ["Razzverse"]
-        cd = duration / len(chunks)
-        phrases = [(i * cd, (i + 1) * cd, ch) for i, ch in enumerate(chunks)]
-
-    # Pre-render subtitle banners once for speed
-    sub_banners = [(s, e, make_sub_banner(txt, font, idx)) for idx, (s, e, txt) in enumerate(phrases)]
-    imgs = [Image.open(p).convert("RGB").resize((W, H)) for p in image_paths]
-    n_scenes = len(imgs)
-    scene_dur = duration / n_scenes
-    total_frames = int(duration * FPS)
-    fade_sec = 0.35
-
-    cmd = [
-        exe, "-y", "-hide_banner", "-loglevel", "error",
-        "-f", "rawvideo", "-vcodec", "rawvideo", "-s", f"{W}x{H}", "-pix_fmt", "rgb24", "-r", str(FPS), "-i", "-",
-        "-i", audio_path, "-i", bgm_path,
-        "-filter_complex", "[1:a]volume=1.0[va];[2:a]volume=0.14[ba];[va][ba]amix=inputs=2:duration=first:dropout_transition=2[outa]",
-        "-map", "0:v:0", "-map", "[outa]",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest", OUT_VIDEO
-    ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-    for f_idx in range(total_frames):
-        t = f_idx / FPS
-        s_idx = min(n_scenes - 1, int(t / scene_dur))
-        local_t = t - s_idx * scene_dur
-        u = local_t / scene_dur
-        frame = animate_crop(imgs[s_idx], u, s_idx % 4)
-
-        # Smooth crossfade to next scene
-        if s_idx < n_scenes - 1 and (scene_dur - local_t) < fade_sec:
-            alpha = 1.0 - (scene_dur - local_t) / fade_sec
-            next_frame = animate_crop(imgs[s_idx + 1], 0.0, (s_idx + 1) % 4)
-            frame = Image.blend(frame, next_frame, max(0.0, min(1.0, alpha)))
-
-        # Overlay MoneyPrinterTurbo pop-subtitle
-        for s, e, banner in sub_banners:
-            if s <= t <= e:
-                frame.paste(banner, (0, H - 470), banner)
-                break
-
-        # Top viral retention progress bar
-        draw = ImageDraw.Draw(frame)
-        prog_w = int(W * (t / duration))
-        draw.rectangle([0, 0, W, 12], fill=(30, 30, 45))
-        draw.rectangle([0, 0, prog_w, 12], fill=(255, 215, 0))
-
-        proc.stdin.write(frame.tobytes())
-
-    proc.stdin.close()
-    err = proc.stderr.read().decode("utf-8", errors="replace")
-    proc.wait(timeout=300)
-    if proc.returncode != 0:
-        raise RuntimeError(f"FFmpeg encode failed: {err[-300:]}")
-    return OUT_VIDEO
-
-def upload_and_notify(data):
-    wh = os.environ.get("MAKE_WEBHOOK_URL", "").strip() or os.environ.get("MAKE_WEBHOOK_URL_3", "").strip() or DEFAULT_WEBHOOK
-    pub_url = ""
-    for host, extra in [("https://catbox.moe/user/api.php", {}), ("https://litterbox.catbox.moe/resources/internals/api.php", {"time": "72h"})]:
-        try:
-            with open(OUT_VIDEO, "rb") as f:
-                r = requests.post(host, data={"reqtype": "fileupload", **extra}, files={"fileToUpload": f}, headers=UA, timeout=120)
-            if r.status_code == 200 and r.text.strip().startswith("http"):
-                pub_url = r.text.strip()
-                log.info("Uploaded HD Video URL: %s", pub_url)
-                break
-        except Exception as e:
-            log.warning("Upload host warning: %s", e)
-
-    payload = {"title": data["title"], "caption": data["caption"], "script": data["voiceover"], "voiceover": data["voiceover"], "video_url": pub_url}
-    open(OUT_META, "w", encoding="utf-8").write(json.dumps(payload, ensure_ascii=False, indent=2))
-
-    try:
-        with open(OUT_VIDEO, "rb") as f:
-            r = requests.post(wh, data=payload, files={"file": (OUT_VIDEO, f, "video/mp4")}, timeout=120)
-        log.info("Make.com Webhook (file) status: %s", r.status_code)
-        if 200 <= r.status_code < 300:
-            return
+        r = requests.get(
+            "https://pixabay.com/api/videos/",
+            params={"key": key, "q": query, "per_page": 10, "safesearch": "true"},
+            headers=UA,
+            timeout=20,
+        )
+        if r.status_code != 200:
+            return None
+        for hit in r.json().get("hits", []):
+            vid = f"pixabay_{hit.get('id')}"
+            if vid in used_ids:
+                continue
+            vids = hit.get("videos", {})
+            link = (vids.get("medium") or vids.get("large") or vids.get("small") or {}).get("url")
+            if link:
+                used_ids.add(vid)
+                return link
     except Exception as e:
-        log.warning("Multipart webhook fallback: %s", e)
-    r = requests.post(wh, json=payload, timeout=60)
-    log.info("Make.com Webhook (JSON) status: %s", r.status_code)
+        log.warning("Pixabay search warning (%s): %s", query, str(e)[:100])
+    return None
 
-def main():
-    now = datetime.now(timezone.utc)
-    # Cycles evenly across all 5 niches (including Brain Puzzles & Riddles)
-    idx = (now.toordinal() * 4 + now.hour // 6) % len(NICHES)
-    log.info("Selected Niche [%d]: %s", idx, NICHES[idx])
-    data = get_script(idx)
-    log.info("Script Ready: %s", data["title"])
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        vf = pool.submit(make_voice_and_subs, data["voiceover"], idx)
-        imf = pool.submit(lambda: [get_hd_image(i, p) for i, p in enumerate(data["image_prompts"])])
-        (audio_path, phrases), images = vf.result(), imf.result()
+def _make_animated_fallback_clip(exe, idx, query, dur, is_kids):
+    """Fallback ONLY if both Pexels & Pixabay fail: fetches a colorful photo and turns it into a smooth moving zoom/pan clip."""
+    img_path = f"fallback_{idx}.jpg"
+    out_clip = f"norm_{idx}.mp4"
+    style = "bright Pixar 3D cartoon kids illustration colorful sunny" if is_kids else "cinematic HD photography dramatic lighting"
+    prompt = f"{query}, {style}, vertical 9:16, no text"
+    saved = False
+    for attempt in range(2):
+        url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width={W}&height={H}&nologo=true&seed={int(time.time()) + idx * 31 + attempt}"
+        try:
+            r = requests.get(url, headers=UA, timeout=35)
+            if r.status_code == 200 and len(r.content) > 6000:
+                img = Image.open(BytesIO(r.content)).convert("RGB").resize((W, H))
+                img.save(img_path, "JPEG", quality=92)
+                saved = True
+                break
+        except Exception:
+            time.sleep(1.5)
 
-    render_animated_video(images, audio_path, phrases, data["voiceover"])
-    upload_and_notify(data)
-    log.info("SUCCESS: HD Animated Video rendered and delivered to Make.com!")
+    if not saved:
+        # Vibrant gradient fallback so we NEVER get a dark blank screen
+        img = Image.new("RGB", (W, H), (255, 190, 40) if is_kids else (30, 45, 95))
+        draw = ImageDraw.Draw(img)
+        for y in range(H):
+            c = int(255 * y / H)
+            color = (255, max(80, 220 - c // 2), min(255, 60 + c // 2)) if is_kids else (20 + c // 8, 35 + c // 6, 90 + c // 4)
+            draw.line([(0, y), (W, y)], fill=color)
+        img.save(img_path, "JPEG", quality=90)
 
-if __name__ == "__main__":
-    main()
+    frames = max(24, int(dur * FPS))
+    zp = f"scale=1280:2276,zoompan=z='min(zoom+0.0018,1.25)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d={frames}:s={W}x{H}:fps={FPS},format=yuv420p"
+    subprocess.run([exe, "-y", "-hide_banner", "-loglevel", "error", "-loop", "1", "-i", img_path, "-t", f"{dur:.2f}", "-vf", zp, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-an", out_clip], check=True)
+    return out_clip
+
+
+def fetch_moving_clips(exe, search_terms, total_dur, is_kids):
+    n = len(search_terms)
+    clip_dur = max(3.5, total_dur / n)
+    used_ids = set()
+    generic_fallbacks = (
+        ["happy children playing", "cute puppy dog", "colorful balloons", "rainbow nature", "cute cat", "butterflies flowers"]
+        if is_kids else
+        ["abstract neon lights", "city night traffic", "galaxy stars space", "clock time", "ocean waves", "mystery forest"]
+    )
+
+    norm_clips = []
+    for i, term in enumerate(search_terms):
+        raw_path = f"raw_{i}.mp4"
+        norm_path = f"norm_{i}.mp4"
+        video_url = None
+
+        for q in (term, generic_fallbacks[i % len(generic_fallbacks)]):
+            video_url = _fetch_pexels_video(q, used_ids) or _fetch_pixabay_video(q, used_ids)
+            if video_url:
+   
